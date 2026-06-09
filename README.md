@@ -5,14 +5,14 @@ Electron desktop scaffold for a Granola-style sales call assistant. The app can 
 ## Run locally
 
 ```bash
-npm install
-npm run dev
+deno install
+deno task dev
 ```
 
 ## Build
 
 ```bash
-npm run build
+deno task build
 ```
 
 ## Current Architecture
@@ -21,6 +21,7 @@ npm run build
 - `electron/preload.ts` exposes a narrow `window.salesCopilot` API to the renderer through Electron IPC.
 - `src/App.tsx` is the meeting console UI with capture readiness, meeting controls, transcript display, and AI coaching placeholders.
 - `src/types/electron.d.ts` keeps the renderer API typed.
+- `deno.json` is the primary task runner for development, linting, builds, and packaging.
 
 ## Native Capture Roadmap
 

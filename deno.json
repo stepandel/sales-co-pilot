@@ -1,0 +1,18 @@
+{
+  "tasks": {
+    "dev": "deno install && ./node_modules/.bin/concurrently -k \"deno task dev:vite\" \"deno task dev:electron\"",
+    "dev:vite": "./node_modules/.bin/vite --host 127.0.0.1",
+    "dev:electron": "./node_modules/.bin/wait-on tcp:5173 && deno task build:electron && VITE_DEV_SERVER_URL=http://localhost:5173 ./node_modules/.bin/electron dist-electron/main.cjs",
+    "build": "deno install && ./node_modules/.bin/tsc -b && ./node_modules/.bin/vite build && deno task build:electron",
+    "build:electron": "./node_modules/.bin/esbuild electron/main.ts electron/preload.ts --bundle --platform=node --format=cjs --outdir=dist-electron --out-extension:.js=.cjs --external:electron",
+    "lint": "deno install && ./node_modules/.bin/eslint .",
+    "preview": "./node_modules/.bin/vite preview",
+    "dist": "deno task build && ./node_modules/.bin/electron-builder"
+  },
+  "fmt": {
+    "exclude": ["dist", "dist-electron", "node_modules"]
+  },
+  "lint": {
+    "exclude": ["dist", "dist-electron", "node_modules"]
+  }
+}
