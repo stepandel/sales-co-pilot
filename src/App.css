@@ -352,14 +352,19 @@ button:disabled {
   font-weight: 800;
 }
 
-.access-chip.requesting {
+.access-chip.checking {
   color: #655014;
   background: #fff2c4;
 }
 
-.access-chip.granted {
+.access-chip.ready {
   color: #244034;
   background: #dce9dc;
+}
+
+.access-chip.capturing {
+  color: #782a2a;
+  background: #fff1ed;
 }
 
 .access-chip.denied {

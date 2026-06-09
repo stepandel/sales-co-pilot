@@ -43,8 +43,8 @@ const coachingPrompts = [
 ]
 
 type AudioAccessState = {
-  microphone: 'idle' | 'requesting' | 'granted' | 'denied'
-  systemAudio: 'idle' | 'requesting' | 'granted' | 'denied'
+  microphone: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
+  systemAudio: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
   message: string
 }
 
@@ -117,6 +117,28 @@ function App() {
     systemAudioStreamRef.current = null
   }
 
+  async function getMicrophoneStream() {
+    return navigator.mediaDevices.getUserMedia({
+      audio: {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+      video: false,
+    })
+  }
+
+  async function getSystemAudioStream() {
+    return navigator.mediaDevices.getDisplayMedia({
+      audio: true,
+      video: {
+        width: { ideal: 640 },
+        height: { ideal: 360 },
+        frameRate: { ideal: 5, max: 10 },
+      },
+    })
+  }
+
   async function refreshPermissions() {
     if (!window.salesCopilot) {
       return
@@ -138,28 +160,22 @@ function App() {
     setIsLoading(true)
     setAudioAccess((current) => ({
       ...current,
-      microphone: 'requesting',
-      message: 'Requesting microphone access...',
+      microphone: 'checking',
+      message: 'Checking microphone permission...',
     }))
 
     try {
       setPermissions(await window.salesCopilot.requestMicrophonePermission())
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-        },
-        video: false,
-      })
-      microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
-      microphoneStreamRef.current = stream
+      const stream = await getMicrophoneStream()
+      const hasAudio = stream.getAudioTracks().length > 0
+      stream.getTracks().forEach((track) => track.stop())
+
       setAudioAccess((current) => ({
         ...current,
-        microphone: stream.getAudioTracks().length > 0 ? 'granted' : 'denied',
+        microphone: hasAudio ? 'ready' : 'denied',
         message:
-          stream.getAudioTracks().length > 0
-            ? 'Microphone access is live.'
+          hasAudio
+            ? 'Microphone is permitted. No mic stream is kept open until a meeting starts.'
             : 'Microphone access returned no audio tracks.',
       }))
     } catch (error) {
@@ -186,29 +202,22 @@ function App() {
     setIsLoading(true)
     setAudioAccess((current) => ({
       ...current,
-      systemAudio: 'requesting',
-      message: 'Requesting system audio through display capture...',
+      systemAudio: 'checking',
+      message: 'Checking system audio through display capture...',
     }))
 
     try {
-      const stream = await navigator.mediaDevices.getDisplayMedia({
-        audio: true,
-        video: {
-          width: { ideal: 640 },
-          height: { ideal: 360 },
-          frameRate: { ideal: 5, max: 10 },
-        },
-      })
-      systemAudioStreamRef.current?.getTracks().forEach((track) => track.stop())
-      systemAudioStreamRef.current = stream
-
+      const stream = await getSystemAudioStream()
       const audioTracks = stream.getAudioTracks()
+      const hasAudio = audioTracks.length > 0
+      stream.getTracks().forEach((track) => track.stop())
+
       setAudioAccess((current) => ({
         ...current,
-        systemAudio: audioTracks.length > 0 ? 'granted' : 'denied',
+        systemAudio: hasAudio ? 'ready' : 'denied',
         message:
-          audioTracks.length > 0
-            ? 'System audio loopback access is live.'
+          hasAudio
+            ? 'System audio is permitted. No loopback stream is kept open until a meeting starts.'
             : 'Display capture started, but no system audio track was returned.',
       }))
     } catch (error) {
@@ -222,14 +231,32 @@ function App() {
     }
   }
 
-  async function ensureAudioAccess() {
-    if (audioAccess.microphone !== 'granted') {
-      await requestMicrophone()
+  async function startAudioStreams() {
+    if (!navigator.mediaDevices?.getUserMedia || !navigator.mediaDevices?.getDisplayMedia) {
+      throw new Error('Audio capture APIs are not available in this runtime.')
     }
 
-    if (audioAccess.systemAudio !== 'granted') {
-      await requestSystemAudio()
+    stopAudioStreams()
+
+    const microphoneStream = await getMicrophoneStream()
+    const systemAudioStream = await getSystemAudioStream()
+
+    const hasMicrophone = microphoneStream.getAudioTracks().length > 0
+    const hasSystemAudio = systemAudioStream.getAudioTracks().length > 0
+
+    if (!hasMicrophone || !hasSystemAudio) {
+      microphoneStream.getTracks().forEach((track) => track.stop())
+      systemAudioStream.getTracks().forEach((track) => track.stop())
+      throw new Error('Audio capture started, but one or more required audio tracks were missing.')
     }
+
+    microphoneStreamRef.current = microphoneStream
+    systemAudioStreamRef.current = systemAudioStream
+    setAudioAccess({
+      microphone: 'capturing',
+      systemAudio: 'capturing',
+      message: 'Meeting audio capture is active. Streams will stop when the meeting stops.',
+    })
   }
 
   async function startMeeting() {
@@ -239,9 +266,17 @@ function App() {
 
     setIsLoading(true)
     try {
-      await ensureAudioAccess()
+      await startAudioStreams()
       setSession(await window.salesCopilot.startMeeting(meetingTitle))
       setPermissions(await window.salesCopilot.getPermissionState())
+    } catch (error) {
+      stopAudioStreams()
+      setAudioAccess((current) => ({
+        ...current,
+        microphone: microphoneStreamRef.current ? 'capturing' : current.microphone === 'capturing' ? 'ready' : current.microphone,
+        systemAudio: systemAudioStreamRef.current ? 'capturing' : current.systemAudio === 'capturing' ? 'ready' : current.systemAudio,
+        message: error instanceof Error ? error.message : 'Audio capture could not start.',
+      }))
     } finally {
       setIsLoading(false)
     }
@@ -252,7 +287,33 @@ function App() {
       return
     }
 
-    setSession(await window.salesCopilot.pauseMeeting())
+    setIsLoading(true)
+    try {
+      if (session?.status === 'recording') {
+        stopAudioStreams()
+        setAudioAccess((current) => ({
+          microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
+          systemAudio: current.systemAudio === 'capturing' ? 'ready' : current.systemAudio,
+          message: 'Meeting paused. Audio streams were released.',
+        }))
+        setSession(await window.salesCopilot.pauseMeeting())
+        return
+      }
+
+      if (session?.status === 'paused') {
+        await startAudioStreams()
+        setSession(await window.salesCopilot.pauseMeeting())
+      }
+    } catch (error) {
+      stopAudioStreams()
+      setAudioAccess((current) => ({
+        microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
+        systemAudio: current.systemAudio === 'capturing' ? 'ready' : current.systemAudio,
+        message: error instanceof Error ? error.message : 'Audio capture could not resume.',
+      }))
+    } finally {
+      setIsLoading(false)
+    }
   }
 
   async function stopMeeting() {
@@ -263,7 +324,8 @@ function App() {
     setSession(await window.salesCopilot.stopMeeting())
     stopAudioStreams()
     setAudioAccess((current) => ({
-      ...current,
+      microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
+      systemAudio: current.systemAudio === 'capturing' ? 'ready' : current.systemAudio,
       message: 'Meeting stopped. Audio streams were released.',
     }))
   }
@@ -317,7 +379,7 @@ function App() {
           <div className="check-row">
             <Volume2 size={17} />
             <span>System audio</span>
-            <b>{audioAccess.systemAudio === 'granted' ? 'Granted' : 'Loopback'}</b>
+            <b>{audioAccess.systemAudio === 'capturing' ? 'Capturing' : 'Loopback'}</b>
           </div>
 
           <button className="secondary-action" type="button" onClick={requestMicrophone} disabled={isLoading}>
@@ -362,7 +424,7 @@ function App() {
               <Play size={18} />
               Start New Meeting
             </button>
-            <button className="icon-action" type="button" onClick={pauseMeeting} disabled={!session || session.status === 'stopped'}>
+            <button className="icon-action" type="button" onClick={pauseMeeting} disabled={isLoading || !session || session.status === 'stopped'}>
               <Pause size={18} />
             </button>
             <button className="icon-action stop" type="button" onClick={stopMeeting} disabled={!session || session.status === 'stopped'}>
@@ -397,7 +459,7 @@ function App() {
 
         {!canUseDesktopBridge && (
           <div className="browser-warning">
-            Run this inside Electron with <code>npm run dev</code> to enable desktop capture APIs.
+            Run this inside Electron with <code>deno task dev</code> to enable desktop capture APIs.
           </div>
         )}
 

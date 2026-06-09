@@ -23,6 +23,10 @@ deno task build
 - `src/types/electron.d.ts` keeps the renderer API typed.
 - `deno.json` is the primary task runner for development, linting, builds, and packaging.
 
+## Capture Privacy
+
+Permission checks may briefly open an audio stream to verify that the OS returned usable tracks, but those probe streams are stopped immediately. Persistent microphone and system-audio streams are only kept while a meeting is actively recording. Stopping or pausing a meeting releases all audio tracks.
+
 ## Native Capture Roadmap
 
 Live mic capture can be handled with WebRTC media APIs or a main-process audio pipeline. System audio capture across FaceTime, WhatsApp, Google Meet, Zoom, and other apps will need an OS-specific implementation, commonly one of:
