@@ -1,0 +1,39 @@
+export type MediaAccessStatus = 'not-determined' | 'granted' | 'denied' | 'restricted' | 'unknown'
+
+export type CaptureSource = {
+  id: string
+  name: string
+  displayId: string
+}
+
+export type PermissionState = {
+  microphone: MediaAccessStatus
+  screen: MediaAccessStatus
+  systemAudio: 'integration-required' | 'available' | 'unavailable'
+  captureSources: CaptureSource[]
+}
+
+export type MeetingStatus = 'idle' | 'checking-permissions' | 'recording' | 'paused' | 'stopped'
+
+export type MeetingSession = {
+  id: string
+  title: string
+  startedAt: string
+  status: MeetingStatus
+  elapsedSeconds: number
+}
+
+export type SalesCopilotApi = {
+  getPermissionState: () => Promise<PermissionState>
+  requestMicrophonePermission: () => Promise<PermissionState>
+  startMeeting: (title?: string) => Promise<MeetingSession>
+  pauseMeeting: () => Promise<MeetingSession | null>
+  stopMeeting: () => Promise<MeetingSession | null>
+  onMeetingUpdated: (callback: (session: MeetingSession | null) => void) => () => void
+}
+
+declare global {
+  interface Window {
+    salesCopilot?: SalesCopilotApi
+  }
+}
