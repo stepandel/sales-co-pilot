@@ -45,7 +45,12 @@
       "package.json"
     ],
     "mac": {
-      "category": "public.app-category.business"
+      "category": "public.app-category.business",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Sales Co-Pilot needs microphone access to transcribe your side of sales calls.",
+        "NSAudioCaptureUsageDescription": "Sales Co-Pilot needs system audio access to transcribe remote participants in calls.",
+        "NSScreenCaptureUsageDescription": "Sales Co-Pilot uses screen capture APIs only to request system audio for live call transcription."
+      }
     }
   }
 }

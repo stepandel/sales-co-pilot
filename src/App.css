@@ -306,6 +306,67 @@ button:disabled {
   font-size: 14px;
 }
 
+.audio-access-panel {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 14px;
+  padding: 10px 12px;
+  border: 1px solid #dedbd2;
+  border-radius: 8px;
+  background: #fffdf7;
+}
+
+.audio-access-panel p {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: #5c574e;
+  font-size: 13px;
+}
+
+.audio-access-panel button {
+  flex: 0 0 auto;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #244034;
+  background: #dce9dc;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.access-chip {
+  flex: 0 0 auto;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 10px;
+  border-radius: 999px;
+  color: #625d53;
+  background: #f0ece2;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.access-chip.requesting {
+  color: #655014;
+  background: #fff2c4;
+}
+
+.access-chip.granted {
+  color: #244034;
+  background: #dce9dc;
+}
+
+.access-chip.denied {
+  color: #8b2d2b;
+  background: #f2d8d1;
+}
+
 code {
   padding: 2px 6px;
   border-radius: 5px;
@@ -454,7 +515,8 @@ code {
 
 @media (max-width: 760px) {
   .topbar,
-  .meeting-control {
+  .meeting-control,
+  .audio-access-panel {
     flex-direction: column;
     align-items: stretch;
   }

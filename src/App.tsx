@@ -14,7 +14,7 @@ import {
   Sparkles,
   Volume2,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
 import type { MeetingSession, PermissionState } from './types/electron'
 
@@ -42,6 +42,12 @@ const coachingPrompts = [
   'Confirm whether legal approval is the buying trigger.',
 ]
 
+type AudioAccessState = {
+  microphone: 'idle' | 'requesting' | 'granted' | 'denied'
+  systemAudio: 'idle' | 'requesting' | 'granted' | 'denied'
+  message: string
+}
+
 function formatElapsed(seconds = 0) {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
@@ -67,6 +73,13 @@ function App() {
   const [session, setSession] = useState<MeetingSession | null>(null)
   const [permissions, setPermissions] = useState<PermissionState | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [audioAccess, setAudioAccess] = useState<AudioAccessState>({
+    microphone: 'idle',
+    systemAudio: 'idle',
+    message: 'Audio access has not been requested yet.',
+  })
+  const microphoneStreamRef = useRef<MediaStream | null>(null)
+  const systemAudioStreamRef = useRef<MediaStream | null>(null)
 
   const isRecording = session?.status === 'recording'
   const canUseDesktopBridge = Boolean(window.salesCopilot)
@@ -89,8 +102,20 @@ function App() {
     }
 
     window.salesCopilot.getPermissionState().then(setPermissions).catch(console.error)
-    return window.salesCopilot.onMeetingUpdated(setSession)
+    const removeMeetingListener = window.salesCopilot.onMeetingUpdated(setSession)
+
+    return () => {
+      removeMeetingListener()
+      stopAudioStreams()
+    }
   }, [])
+
+  function stopAudioStreams() {
+    microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
+    systemAudioStreamRef.current?.getTracks().forEach((track) => track.stop())
+    microphoneStreamRef.current = null
+    systemAudioStreamRef.current = null
+  }
 
   async function refreshPermissions() {
     if (!window.salesCopilot) {
@@ -106,15 +131,104 @@ function App() {
   }
 
   async function requestMicrophone() {
-    if (!window.salesCopilot) {
+    if (!window.salesCopilot || !navigator.mediaDevices?.getUserMedia) {
       return
     }
 
     setIsLoading(true)
+    setAudioAccess((current) => ({
+      ...current,
+      microphone: 'requesting',
+      message: 'Requesting microphone access...',
+    }))
+
     try {
       setPermissions(await window.salesCopilot.requestMicrophonePermission())
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+        video: false,
+      })
+      microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
+      microphoneStreamRef.current = stream
+      setAudioAccess((current) => ({
+        ...current,
+        microphone: stream.getAudioTracks().length > 0 ? 'granted' : 'denied',
+        message:
+          stream.getAudioTracks().length > 0
+            ? 'Microphone access is live.'
+            : 'Microphone access returned no audio tracks.',
+      }))
+    } catch (error) {
+      setAudioAccess((current) => ({
+        ...current,
+        microphone: 'denied',
+        message: error instanceof Error ? error.message : 'Microphone access was denied.',
+      }))
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function requestSystemAudio() {
+    if (!navigator.mediaDevices?.getDisplayMedia) {
+      setAudioAccess((current) => ({
+        ...current,
+        systemAudio: 'denied',
+        message: 'Display media capture is not available in this runtime.',
+      }))
+      return
+    }
+
+    setIsLoading(true)
+    setAudioAccess((current) => ({
+      ...current,
+      systemAudio: 'requesting',
+      message: 'Requesting system audio through display capture...',
+    }))
+
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        audio: true,
+        video: {
+          width: { ideal: 640 },
+          height: { ideal: 360 },
+          frameRate: { ideal: 5, max: 10 },
+        },
+      })
+      systemAudioStreamRef.current?.getTracks().forEach((track) => track.stop())
+      systemAudioStreamRef.current = stream
+
+      const audioTracks = stream.getAudioTracks()
+      setAudioAccess((current) => ({
+        ...current,
+        systemAudio: audioTracks.length > 0 ? 'granted' : 'denied',
+        message:
+          audioTracks.length > 0
+            ? 'System audio loopback access is live.'
+            : 'Display capture started, but no system audio track was returned.',
+      }))
+    } catch (error) {
+      setAudioAccess((current) => ({
+        ...current,
+        systemAudio: 'denied',
+        message: error instanceof Error ? error.message : 'System audio access was denied.',
+      }))
+    } finally {
+      setIsLoading(false)
+    }
+  }
+
+  async function ensureAudioAccess() {
+    if (audioAccess.microphone !== 'granted') {
+      await requestMicrophone()
+    }
+
+    if (audioAccess.systemAudio !== 'granted') {
+      await requestSystemAudio()
     }
   }
 
@@ -125,6 +239,7 @@ function App() {
 
     setIsLoading(true)
     try {
+      await ensureAudioAccess()
       setSession(await window.salesCopilot.startMeeting(meetingTitle))
       setPermissions(await window.salesCopilot.getPermissionState())
     } finally {
@@ -146,6 +261,11 @@ function App() {
     }
 
     setSession(await window.salesCopilot.stopMeeting())
+    stopAudioStreams()
+    setAudioAccess((current) => ({
+      ...current,
+      message: 'Meeting stopped. Audio streams were released.',
+    }))
   }
 
   return (
@@ -197,11 +317,14 @@ function App() {
           <div className="check-row">
             <Volume2 size={17} />
             <span>System audio</span>
-            <b>Native slot</b>
+            <b>{audioAccess.systemAudio === 'granted' ? 'Granted' : 'Loopback'}</b>
           </div>
 
-          <button className="secondary-action" type="button" onClick={requestMicrophone}>
+          <button className="secondary-action" type="button" onClick={requestMicrophone} disabled={isLoading}>
             Request Mic Access
+          </button>
+          <button className="secondary-action" type="button" onClick={requestSystemAudio} disabled={isLoading}>
+            Request System Audio
           </button>
         </div>
       </aside>
@@ -246,6 +369,30 @@ function App() {
               <Square size={17} />
             </button>
           </div>
+        </section>
+
+        <section className="audio-access-panel">
+          <div className={`access-chip ${audioAccess.microphone}`}>
+            <Mic size={16} />
+            Mic: {audioAccess.microphone}
+          </div>
+          <div className={`access-chip ${audioAccess.systemAudio}`}>
+            <Volume2 size={16} />
+            System: {audioAccess.systemAudio}
+          </div>
+          <p>{audioAccess.message}</p>
+          <button
+            type="button"
+            onClick={() => window.salesCopilot?.openPermissionSettings('microphone')}
+          >
+            Mic Settings
+          </button>
+          <button
+            type="button"
+            onClick={() => window.salesCopilot?.openPermissionSettings('screen')}
+          >
+            Screen Settings
+          </button>
         </section>
 
         {!canUseDesktopBridge && (

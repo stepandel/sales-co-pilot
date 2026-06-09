@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences } from 'electron'
 import path from 'node:path'
 
 type MeetingStatus = 'idle' | 'checking-permissions' | 'recording' | 'paused' | 'stopped'
@@ -39,6 +39,28 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+}
+
+function configureDisplayCapture() {
+  session.defaultSession.setDisplayMediaRequestHandler(
+    (_request, callback) => {
+      desktopCapturer
+        .getSources({
+          types: ['screen'],
+          thumbnailSize: { width: 0, height: 0 },
+        })
+        .then((sources) => {
+          callback({
+            video: sources[0],
+            audio: 'loopback',
+          })
+        })
+        .catch(() => {
+          callback({})
+        })
+    },
+    { useSystemPicker: false },
+  )
 }
 
 function publishMeeting() {
@@ -82,7 +104,9 @@ async function getPermissionState() {
   return {
     microphone,
     screen,
-    systemAudio: 'integration-required',
+    systemAudio: process.platform === 'darwin' ? 'available-with-display-capture' : 'available-with-display-capture',
+    platform: process.platform,
+    macAudioCaptureRequiresUsageDescription: process.platform === 'darwin',
     captureSources: sources,
   }
 }
@@ -96,6 +120,20 @@ ipcMain.handle('permissions:request-microphone', async () => {
 
   await systemPreferences.askForMediaAccess('microphone')
   return getPermissionState()
+})
+
+ipcMain.handle('permissions:open-settings', async (_event, pane: 'microphone' | 'screen' | 'system-audio') => {
+  if (process.platform !== 'darwin') {
+    return false
+  }
+
+  const paneUrl =
+    pane === 'microphone'
+      ? 'x-apple.systempreferences:com.apple.preference.security?Privacy_Microphone'
+      : 'x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture'
+
+  await shell.openExternal(paneUrl)
+  return true
 })
 
 ipcMain.handle('meeting:start', async (_event, title?: string) => {
@@ -147,6 +185,7 @@ app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(['media', 'display-capture'].includes(permission))
   })
+  configureDisplayCapture()
 
   createWindow()
 

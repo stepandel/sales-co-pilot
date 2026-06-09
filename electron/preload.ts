@@ -3,6 +3,8 @@ import { contextBridge, ipcRenderer } from 'electron'
 const api = {
   getPermissionState: () => ipcRenderer.invoke('permissions:get-state'),
   requestMicrophonePermission: () => ipcRenderer.invoke('permissions:request-microphone'),
+  openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') =>
+    ipcRenderer.invoke('permissions:open-settings', pane),
   startMeeting: (title?: string) => ipcRenderer.invoke('meeting:start', title),
   pauseMeeting: () => ipcRenderer.invoke('meeting:pause'),
   stopMeeting: () => ipcRenderer.invoke('meeting:stop'),

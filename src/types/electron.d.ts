@@ -9,7 +9,9 @@ export type CaptureSource = {
 export type PermissionState = {
   microphone: MediaAccessStatus
   screen: MediaAccessStatus
-  systemAudio: 'integration-required' | 'available' | 'unavailable'
+  systemAudio: 'available-with-display-capture' | 'available' | 'unavailable'
+  platform: NodeJS.Platform
+  macAudioCaptureRequiresUsageDescription: boolean
   captureSources: CaptureSource[]
 }
 
@@ -26,6 +28,7 @@ export type MeetingSession = {
 export type SalesCopilotApi = {
   getPermissionState: () => Promise<PermissionState>
   requestMicrophonePermission: () => Promise<PermissionState>
+  openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') => Promise<boolean>
   startMeeting: (title?: string) => Promise<MeetingSession>
   pauseMeeting: () => Promise<MeetingSession | null>
   stopMeeting: () => Promise<MeetingSession | null>
