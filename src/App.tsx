@@ -56,12 +56,25 @@ type TestTranscriptLine = {
   text: string
 }
 
-// Test-mode transcript format, one utterance per line:
-//   MM:SS Speaker: text   (or [MM:SS] / H:MM:SS)
-// "You" / "Me" / "Rep" map to the rep side. Lines without a timestamp
+type ParsedTestTranscript = {
+  title: string | null
+  lines: TestTranscriptLine[]
+}
+
+const WORDS_PER_SECOND = 2.5 // ~150 wpm conversational pace
+const MIN_UTTERANCE_SECONDS = 2
+
+// Test-mode transcript formats, one utterance per line:
+//   - timestamped:     "MM:SS Speaker: text"  (or [MM:SS] / H:MM:SS)
+//   - Granola export:  "Me: text" / "Them: text" with an optional metadata
+//     header (Meeting Title / Date / Meeting participants / Transcript:) and
+//     no timestamps — pacing is then estimated from word count.
+// "You" / "Me" / "Rep" map to the rep side. Lines that match neither shape
 // continue the previous utterance; blank lines and "#" comments are skipped.
-function parseTestTranscript(raw: string): TestTranscriptLine[] {
+function parseTestTranscript(raw: string): ParsedTestTranscript {
   const lines: TestTranscriptLine[] = []
+  let title: string | null = null
+  let clock = 0
 
   for (const rawLine of raw.split(/\r?\n/)) {
     const line = rawLine.trim()
@@ -69,33 +82,53 @@ function parseTestTranscript(raw: string): TestTranscriptLine[] {
       continue
     }
 
-    const match = line.match(/^\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?\s+([^:]+):\s*(.+)$/)
-    if (!match) {
+    const titleMatch = line.match(/^meeting title:\s*(.+)$/i)
+    if (titleMatch) {
+      title = titleMatch[1].trim()
+      continue
+    }
+
+    if (/^(date|meeting participants|attendees|transcript):/i.test(line)) {
+      continue
+    }
+
+    const timeMatch = line.match(/^\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?\s+(.+)$/)
+    const body = timeMatch ? timeMatch[4] : line
+    const explicitSeconds = timeMatch
+      ? timeMatch[3] === undefined
+        ? Number(timeMatch[1]) * 60 + Number(timeMatch[2])
+        : Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + Number(timeMatch[3])
+      : null
+
+    const speakerMatch = body.match(/^([A-Za-z][A-Za-z0-9 .'-]{0,24}):\s*(.+)$/)
+    if (!speakerMatch) {
       if (lines.length > 0) {
-        lines[lines.length - 1].text += ` ${line}`
+        lines[lines.length - 1].text += ` ${body}`
       }
       continue
     }
 
-    const [, first, second, third, rawSpeaker, text] = match
-    const seconds = third
-      ? Number(first) * 3600 + Number(second) * 60 + Number(third)
-      : Number(first) * 60 + Number(second)
-    const speaker = rawSpeaker.trim()
+    const speaker = speakerMatch[1].trim()
+    const text = speakerMatch[2].trim()
+    const seconds = explicitSeconds ?? clock
+    clock =
+      seconds +
+      Math.max(MIN_UTTERANCE_SECONDS, Math.round(text.split(/\s+/).length / WORDS_PER_SECOND))
 
     lines.push({
       speaker,
       isRep: /^(you|me|rep)$/i.test(speaker),
       seconds,
       time: formatElapsed(seconds),
-      text: text.trim(),
+      text,
     })
   }
 
-  return lines.sort((a, b) => a.seconds - b.seconds)
+  return { title, lines: lines.sort((a, b) => a.seconds - b.seconds) }
 }
 
 const AUTO_ANALYZE_INTERVAL_MS = 12_000
+const TEST_SPEEDS = [1, 4, 8] as const
 
 type AudioAccessState = {
   microphone: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
@@ -135,6 +168,7 @@ function App() {
     message: 'Audio access has not been requested yet.',
   })
   const [testLines, setTestLines] = useState<TestTranscriptLine[]>([])
+  const [testSpeed, setTestSpeed] = useState<(typeof TEST_SPEEDS)[number]>(1)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
@@ -174,13 +208,17 @@ function App() {
   )
 
   const elapsedSeconds = session?.elapsedSeconds ?? 0
-  const shouldWrapSoon = stageIdx >= 5 || elapsedSeconds > TARGET_SECONDS - 90
+  // In test mode the session timer drives a synthetic call clock that the
+  // playback speed multiplies; everything downstream (timer, pacing, reveals)
+  // runs on call time so they stay coherent at 4x/8x.
+  const callSeconds = testMode ? elapsedSeconds * testSpeed : elapsedSeconds
+  const shouldWrapSoon = stageIdx >= 5 || callSeconds > TARGET_SECONDS - 90
 
-  // Test mode: the meeting timer "plays" the transcript — a line is revealed
-  // once the session clock passes its timestamp.
+  // Test mode: the call clock "plays" the transcript — a line is revealed
+  // once the clock passes its timestamp.
   const revealedLines = useMemo(
-    () => (testMode && session ? testLines.filter((line) => line.seconds <= elapsedSeconds) : []),
-    [testMode, session, testLines, elapsedSeconds],
+    () => (testMode && session ? testLines.filter((line) => line.seconds <= callSeconds) : []),
+    [testMode, session, testLines, callSeconds],
   )
 
   const displayedTranscript = testMode
@@ -207,8 +245,14 @@ function App() {
     const removeMeetingListener = window.salesCopilot.onMeetingUpdated(setSession)
 
     window.salesCopilot.getTestTranscript().then((raw) => {
-      if (raw) {
-        setTestLines(parseTestTranscript(raw))
+      if (!raw) {
+        return
+      }
+
+      const parsed = parseTestTranscript(raw)
+      setTestLines(parsed.lines)
+      if (parsed.title) {
+        setMeetingTitle(parsed.title)
       }
     })
 
@@ -490,7 +534,20 @@ function App() {
         <span className={`live-dot ${isRecording ? 'live' : ''}`} />
         <strong className="titlebar-name">Co-pilot</strong>
         <span className="titlebar-status">{meetingStatus}</span>
-        {testMode && <span className="test-badge">Test</span>}
+        {testMode && (
+          <button
+            type="button"
+            className="test-badge"
+            title="Test mode playback speed — click to change"
+            onClick={() =>
+              setTestSpeed(
+                (speed) => TEST_SPEEDS[(TEST_SPEEDS.indexOf(speed) + 1) % TEST_SPEEDS.length],
+              )
+            }
+          >
+            Test {testSpeed}&times;
+          </button>
+        )}
 
         <div className="session-controls">
           {showStart ? (
@@ -534,7 +591,7 @@ function App() {
           aria-label="Meeting name"
         />
         <span className="timer">
-          {formatElapsed(elapsedSeconds)} <em>/ {formatElapsed(TARGET_SECONDS)}</em>
+          {formatElapsed(callSeconds)} <em>/ {formatElapsed(TARGET_SECONDS)}</em>
         </span>
       </div>
 

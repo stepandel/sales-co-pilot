@@ -27,22 +27,30 @@ deno task build
 
 If `test-transcript.txt` exists at the project root (or `TEST_TRANSCRIPT` points to a file), the
 app runs in test mode: pressing **Start** plays the transcript back against the meeting timer
-instead of capturing audio. Lines appear in the Transcript view as their timestamps pass, and the
-co-pilot re-analyzes the conversation as new lines land — pause, resume, stop, the stage rail,
-gaps, and facts all behave exactly as in a live call. A "Test" badge shows in the titlebar.
+instead of capturing audio. Lines appear in the Transcript view as the call clock passes them, and
+the co-pilot re-analyzes the conversation as new lines land — pause, resume, stop, the stage rail,
+gaps, and facts all behave exactly as in a live call. The amber "Test" badge in the titlebar shows
+the playback speed; click it to cycle 1× → 4× → 8×.
 
-Transcript format — one utterance per line:
+The file is gitignored (it usually contains real call content) — drop your own at the project
+root; delete it to return to live capture. Two formats are supported, one utterance per line:
 
 ```
-MM:SS Speaker: what they said
+# Granola-style export — no timestamps; pacing is estimated at ~150 wpm.
+Meeting Title: maz / Carlos Noriega - Carlos Noriega | Squads
+Meeting participants: ...
+Transcript:
+Them: Hello?
+Me: Yeah. I don't have any recordings...
+
+# Timestamped — MM:SS (or [MM:SS] / H:MM:SS) controls pacing exactly.
 00:05 You: Thanks for making time...
 00:14 Prospect: Sure. We're a 40-person sales org...
 ```
 
-`You` / `Me` / `Rep` map to the rep side; any other name is the prospect. `[MM:SS]` brackets and
-`H:MM:SS` timestamps also work. Blank lines and `#` comments are skipped; a line without a
-timestamp continues the previous utterance. Timestamps control pacing, so compress them for a
-faster run-through. Delete the file to return to live capture. A sample call ships in the repo.
+`You` / `Me` / `Rep` map to the rep side; any other name (e.g. `Them`, `Prospect`) is the
+prospect. A `Meeting Title:` header prefills the meeting name. Blank lines, `#` comments, and the
+metadata header are skipped; a line that matches neither shape continues the previous utterance.
 
 ## Current Architecture
 
