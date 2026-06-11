@@ -238,6 +238,30 @@ function emphasizedQuestion(question: string, emphasis: string) {
 
 const isMac = navigator.platform.toUpperCase().includes('MAC')
 
+// Pure capture helpers: they only touch global `navigator.mediaDevices`, so they
+// live at module scope instead of being rebuilt on every render of <App />.
+async function getMicrophoneStream() {
+  return navigator.mediaDevices.getUserMedia({
+    audio: {
+      echoCancellation: true,
+      noiseSuppression: true,
+      autoGainControl: true,
+    },
+    video: false,
+  })
+}
+
+async function getSystemAudioStream() {
+  return navigator.mediaDevices.getDisplayMedia({
+    audio: true,
+    video: {
+      width: { ideal: 640 },
+      height: { ideal: 360 },
+      frameRate: { ideal: 5, max: 10 },
+    },
+  })
+}
+
 function App() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
   const [session, setSession] = useState<MeetingSession | null>(null)
@@ -378,28 +402,6 @@ function App() {
     systemAudioStreamRef.current?.getTracks().forEach((track) => track.stop())
     microphoneStreamRef.current = null
     systemAudioStreamRef.current = null
-  }
-
-  async function getMicrophoneStream() {
-    return navigator.mediaDevices.getUserMedia({
-      audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-      },
-      video: false,
-    })
-  }
-
-  async function getSystemAudioStream() {
-    return navigator.mediaDevices.getDisplayMedia({
-      audio: true,
-      video: {
-        width: { ideal: 640 },
-        height: { ideal: 360 },
-        frameRate: { ideal: 5, max: 10 },
-      },
-    })
   }
 
   async function requestMicrophone() {
