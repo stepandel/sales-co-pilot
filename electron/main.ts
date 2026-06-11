@@ -244,6 +244,10 @@ function extractResponseText(response: Record<string, unknown>) {
   throw new Error('OpenAI response did not include output text.')
 }
 
+function logJson(label: string, value: unknown) {
+  console.info(label, JSON.stringify(value, null, 2))
+}
+
 async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
@@ -252,43 +256,64 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
   const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
+  const startedAt = Date.now()
+  const transcriptForPrompt = transcript.slice(-40)
+  const requestBody = {
+    model,
+    store: false,
+    input: [
+      {
+        role: 'system',
+        content: salesCopilotSystemPrompt,
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          currentStage: 'Just here to learn',
+          facts: [],
+          gaps: [...defaultOpenGaps],
+          mossContext: [],
+          transcript: transcriptForPrompt,
+        }),
+      },
+    ],
+    text: {
+      format: {
+        type: 'json_schema',
+        name: 'sales_copilot_analysis',
+        strict: true,
+        schema: copilotAnalysisSchema,
+      },
+    },
+  }
+
+  logJson('openai_request', {
+    url: `${baseUrl.replace(/\/$/, '')}/responses`,
+    model,
+    transcriptTurns: transcriptForPrompt.length,
+    body: requestBody,
+  })
+
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/responses`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${apiKey}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      model,
-      store: false,
-      input: [
-        {
-          role: 'system',
-          content: salesCopilotSystemPrompt,
-        },
-        {
-          role: 'user',
-          content: JSON.stringify({
-            currentStage: 'Just here to learn',
-            facts: [],
-            gaps: [...defaultOpenGaps],
-            mossContext: [],
-            transcript: transcript.slice(-40),
-          }),
-        },
-      ],
-      text: {
-        format: {
-          type: 'json_schema',
-          name: 'sales_copilot_analysis',
-          strict: true,
-          schema: copilotAnalysisSchema,
-        },
-      },
-    }),
+    body: JSON.stringify(requestBody),
   })
 
   const body = (await response.json()) as Record<string, unknown>
+  logJson('openai_response', {
+    model,
+    ok: response.ok,
+    status: response.status,
+    durationMs: Date.now() - startedAt,
+    usage: body.usage,
+    id: body.id,
+    body,
+  })
+
   if (!response.ok) {
     const error =
       body.error && typeof body.error === 'object' && 'message' in body.error
@@ -298,9 +323,17 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
   }
 
   const rawContent = extractResponseText(body)
+  const parsedAnalysis = parseCopilotAnalysis(parseJsonModelContent(rawContent))
+  logJson('openai_parsed_analysis', {
+    model,
+    durationMs: Date.now() - startedAt,
+    rawContent,
+    analysis: parsedAnalysis,
+  })
+
   return {
     model,
-    analysis: parseCopilotAnalysis(parseJsonModelContent(rawContent)),
+    analysis: parsedAnalysis,
   }
 }
 
