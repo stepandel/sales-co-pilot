@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, ipcMain, screen, session, shell, systemPreferences } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -54,13 +54,22 @@ function loadLocalEnv() {
 
 loadLocalEnv()
 
+const PANEL_WIDTH = 340
+
 function createWindow() {
+  // Dock the panel full-height against the right edge of the primary display
+  // so it sits beside a Zoom / Google Meet window like a side rail.
+  const { workArea } = screen.getPrimaryDisplay()
+  const panelHeight = workArea.height
+
   mainWindow = new BrowserWindow({
-    width: 384,
-    height: 860,
-    minWidth: 344,
-    minHeight: 600,
-    maxWidth: 520,
+    width: PANEL_WIDTH,
+    height: panelHeight,
+    x: workArea.x + workArea.width - PANEL_WIDTH,
+    y: workArea.y,
+    minWidth: 300,
+    minHeight: 560,
+    maxWidth: 420,
     title: 'Sales Co-Pilot',
     backgroundColor: '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
