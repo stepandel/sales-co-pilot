@@ -456,6 +456,18 @@
   text-underline-offset: 3px;
 }
 
+/* Interrogative words always carry full ink — they tell the rep what kind of
+   answer the question is fishing for. */
+.ask-question .qw {
+  font-weight: 500;
+  color: var(--ink);
+}
+
+.ask-alt .qw {
+  font-weight: 500;
+  color: #57524a;
+}
+
 .ask-reason {
   display: flex;
   gap: 7px;

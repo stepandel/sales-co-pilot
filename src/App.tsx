@@ -1,5 +1,5 @@
 import { Mic, Pause, Pin, Play, Settings2, Sparkles, Square, Volume2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './App.css'
 import type { MeetingSession, TranscriptTurn } from './types/electron'
 import type { CopilotAnalysis } from './types/electron'
@@ -150,19 +150,64 @@ function readableError(error: unknown) {
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
+const QUESTION_WORDS =
+  /\b(?:how(?:\s+(?:much|many|often|long|soon))?|what|when|where|who|whom|whose|why|which)\b/gi
+const LEADING_AUXILIARY =
+  /^(?:do|does|did|can|could|would|will|should|is|are|was|were|have|has|had)\b/i
+
+// Interrogative words signal the question's purpose, so they always keep full
+// ink (see .qw in App.css) even when the rest of the question dims.
+function withQuestionWords(text: string, atQuestionStart: boolean): ReactNode[] {
+  const nodes: ReactNode[] = []
+  let cursor = 0
+
+  const lead = atQuestionStart ? text.match(LEADING_AUXILIARY) : null
+  if (lead) {
+    nodes.push(
+      <b className="qw" key="lead">
+        {lead[0]}
+      </b>,
+    )
+    cursor = lead[0].length
+  }
+
+  for (const match of text.matchAll(QUESTION_WORDS)) {
+    const index = match.index ?? 0
+    if (index < cursor) {
+      continue
+    }
+
+    if (index > cursor) {
+      nodes.push(text.slice(cursor, index))
+    }
+    nodes.push(
+      <b className="qw" key={index}>
+        {match[0]}
+      </b>,
+    )
+    cursor = index + match[0].length
+  }
+
+  if (cursor < text.length) {
+    nodes.push(text.slice(cursor))
+  }
+
+  return nodes
+}
+
 // The key span stays full-ink while the rest of the question dims (see
 // .has-key in App.css), so the rep can catch the ask without reading it all.
 function emphasizedQuestion(question: string, emphasis: string) {
   const index = emphasis ? question.indexOf(emphasis) : -1
   if (index === -1) {
-    return question
+    return <>{withQuestionWords(question, true)}</>
   }
 
   return (
     <>
-      {question.slice(0, index)}
+      {withQuestionWords(question.slice(0, index), true)}
       <mark>{emphasis}</mark>
-      {question.slice(index + emphasis.length)}
+      {withQuestionWords(question.slice(index + emphasis.length), false)}
     </>
   )
 }
