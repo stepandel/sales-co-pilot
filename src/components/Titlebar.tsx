@@ -1,13 +1,15 @@
 import { History, Pause, Pin, Play, Square } from 'lucide-react'
 
+const isMac = navigator.platform.toUpperCase().includes('MAC')
+
 type TitlebarProps = {
-  isMac: boolean
-  isRecording: boolean
+  /** Session control state: idle (show Start), or an active meeting that can be
+   *  paused/resumed and stopped. */
+  control: 'idle' | 'recording' | 'paused'
   meetingStatus: string
   testMode: boolean
   testSpeed: number
   onCycleSpeed: () => void
-  showStart: boolean
   isLoading: boolean
   canUseDesktopBridge: boolean
   onStart: () => void
@@ -17,13 +19,11 @@ type TitlebarProps = {
 }
 
 export function Titlebar({
-  isMac,
-  isRecording,
+  control,
   meetingStatus,
   testMode,
   testSpeed,
   onCycleSpeed,
-  showStart,
   isLoading,
   canUseDesktopBridge,
   onStart,
@@ -31,6 +31,8 @@ export function Titlebar({
   onStop,
   onOpenDashboard,
 }: TitlebarProps) {
+  const isRecording = control === 'recording'
+
   return (
     <header className={`titlebar ${isMac ? 'mac' : ''}`}>
       <span className={`live-dot ${isRecording ? 'live' : ''}`} />
@@ -48,7 +50,7 @@ export function Titlebar({
       )}
 
       <div className="session-controls">
-        {showStart ? (
+        {control === 'idle' ? (
           <button
             className="start-btn"
             type="button"

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import './App.css'
 import type { CopilotAnalysis, MeetingSession, TranscriptTurn } from './types/electron'
 import { DISCOVERY_STAGES } from './discovery'
@@ -128,8 +128,6 @@ function readableError(error: unknown) {
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
-const isMac = navigator.platform.toUpperCase().includes('MAC')
-
 // Pure capture helpers: they only touch global `navigator.mediaDevices`, so they
 // live at module scope instead of being rebuilt on every render of <App />.
 async function getMicrophoneStream() {
@@ -154,15 +152,56 @@ async function getSystemAudioStream() {
   })
 }
 
-function App() {
+// The analysis cluster changes as one unit (start → succeeded/failed →
+// finished), so it's a single reducer instead of four separate useState calls.
+type AnalysisState = {
+  analysis: CopilotAnalysis | null
+  error: string
+  model: string
+  isAnalyzing: boolean
+}
+
+type AnalysisAction =
+  | { type: 'start' }
+  | { type: 'succeeded'; model: string; analysis: CopilotAnalysis }
+  | { type: 'failed'; error: string }
+  | { type: 'finished' }
+  | { type: 'reset' }
+
+const initialAnalysisState: AnalysisState = {
+  analysis: null,
+  error: '',
+  model: 'gpt-5.4-mini',
+  isAnalyzing: false,
+}
+
+function analysisReducer(state: AnalysisState, action: AnalysisAction): AnalysisState {
+  switch (action.type) {
+    case 'start':
+      return { ...state, isAnalyzing: true, error: '' }
+    case 'succeeded':
+      return { ...state, model: action.model, analysis: action.analysis }
+    case 'failed':
+      return { ...state, error: action.error }
+    case 'finished':
+      return { ...state, isAnalyzing: false }
+    case 'reset':
+      return { ...state, analysis: null, error: '' }
+    default:
+      return state
+  }
+}
+
+// All meeting/session/audio/analysis state and handlers live here so <App />
+// stays a thin view layer.
+function useCopilotSession() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
   const [session, setSession] = useState<MeetingSession | null>(null)
   const [view, setView] = useState<'copilot' | 'transcript'>('copilot')
   const [isLoading, setIsLoading] = useState(false)
-  const [isAnalyzing, setIsAnalyzing] = useState(false)
-  const [copilotModel, setCopilotModel] = useState('gpt-5.4-mini')
-  const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
-  const [copilotError, setCopilotError] = useState('')
+  const [analysisState, dispatchAnalysis] = useReducer(analysisReducer, initialAnalysisState)
+  const { analysis: copilotAnalysis, error: copilotError, model: copilotModel, isAnalyzing } =
+    analysisState
   const [audioAccess, setAudioAccess] = useState<AudioAccessState>({
     microphone: 'idle',
     systemAudio: 'idle',
@@ -429,8 +468,7 @@ function App() {
       if (testMode) {
         lastAutoAnalyzeRef.current = { count: 0, at: 0 }
         setScrubOffset(0)
-        setCopilotAnalysis(null)
-        setCopilotError('')
+        dispatchAnalysis({ type: 'reset' })
         setAudioAccess((current) => ({
           ...current,
           message: 'Test mode: playing the transcript file. Audio capture is bypassed.',
@@ -460,16 +498,14 @@ function App() {
       return
     }
 
-    setIsAnalyzing(true)
-    setCopilotError('')
+    dispatchAnalysis({ type: 'start' })
     try {
       const result = await window.salesCopilot.analyzeCall(analysisTurns)
-      setCopilotModel(result.model)
-      setCopilotAnalysis(result.analysis)
+      dispatchAnalysis({ type: 'succeeded', model: result.model, analysis: result.analysis })
     } catch (error) {
-      setCopilotError(readableError(error) || 'Co-pilot analysis failed.')
+      dispatchAnalysis({ type: 'failed', error: readableError(error) || 'Co-pilot analysis failed.' })
     } finally {
-      setIsAnalyzing(false)
+      dispatchAnalysis({ type: 'finished' })
     }
   }
 
@@ -538,16 +574,90 @@ function App() {
     }))
   }
 
+  return {
+    meetingTitle,
+    setMeetingTitle,
+    session,
+    view,
+    setView,
+    isLoading,
+    isAnalyzing,
+    copilotModel,
+    copilotAnalysis,
+    copilotError,
+    audioAccess,
+    testSpeed,
+    testMode,
+    isRecording,
+    showStart,
+    canUseDesktopBridge,
+    meetingStatus,
+    stageIdx,
+    primaryQuestion,
+    secondaryQuestion,
+    completedGaps,
+    callSeconds,
+    shouldWrapSoon,
+    transcriptDuration,
+    displayedTranscript,
+    transcriptRef,
+    requestMicrophone,
+    requestSystemAudio,
+    scrubTo,
+    cycleTestSpeed,
+    startMeeting,
+    analyzeCall,
+    pauseMeeting,
+    stopMeeting,
+  }
+}
+
+function App() {
+  const {
+    meetingTitle,
+    setMeetingTitle,
+    session,
+    view,
+    setView,
+    isLoading,
+    isAnalyzing,
+    copilotModel,
+    copilotAnalysis,
+    copilotError,
+    audioAccess,
+    testSpeed,
+    testMode,
+    isRecording,
+    showStart,
+    canUseDesktopBridge,
+    meetingStatus,
+    stageIdx,
+    primaryQuestion,
+    secondaryQuestion,
+    completedGaps,
+    callSeconds,
+    shouldWrapSoon,
+    transcriptDuration,
+    displayedTranscript,
+    transcriptRef,
+    requestMicrophone,
+    requestSystemAudio,
+    scrubTo,
+    cycleTestSpeed,
+    startMeeting,
+    analyzeCall,
+    pauseMeeting,
+    stopMeeting,
+  } = useCopilotSession()
+
   return (
     <main className="panel">
       <Titlebar
-        isMac={isMac}
-        isRecording={isRecording}
+        control={showStart ? 'idle' : isRecording ? 'recording' : 'paused'}
         meetingStatus={meetingStatus}
         testMode={testMode}
         testSpeed={testSpeed}
         onCycleSpeed={cycleTestSpeed}
-        showStart={showStart}
         isLoading={isLoading}
         canUseDesktopBridge={canUseDesktopBridge}
         onStart={startMeeting}
