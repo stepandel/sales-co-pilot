@@ -256,7 +256,6 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
   const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
-  const startedAt = Date.now()
   const transcriptForPrompt = transcript.slice(-40)
   const requestBody = {
     model,
@@ -287,12 +286,7 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
     },
   }
 
-  logJson('openai_request', {
-    url: `${baseUrl.replace(/\/$/, '')}/responses`,
-    model,
-    transcriptTurns: transcriptForPrompt.length,
-    body: requestBody,
-  })
+  logJson('openai_request_body', requestBody)
 
   const response = await fetch(`${baseUrl.replace(/\/$/, '')}/responses`, {
     method: 'POST',
@@ -304,15 +298,7 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
   })
 
   const body = (await response.json()) as Record<string, unknown>
-  logJson('openai_response', {
-    model,
-    ok: response.ok,
-    status: response.status,
-    durationMs: Date.now() - startedAt,
-    usage: body.usage,
-    id: body.id,
-    body,
-  })
+  logJson('openai_response_body', body)
 
   if (!response.ok) {
     const error =
@@ -324,12 +310,6 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
 
   const rawContent = extractResponseText(body)
   const parsedAnalysis = parseCopilotAnalysis(parseJsonModelContent(rawContent))
-  logJson('openai_parsed_analysis', {
-    model,
-    durationMs: Date.now() - startedAt,
-    rawContent,
-    analysis: parsedAnalysis,
-  })
 
   return {
     model,
