@@ -1,5 +1,15 @@
 import { app, BrowserWindow, desktopCapturer, ipcMain, session, shell, systemPreferences } from 'electron'
+import fs from 'node:fs'
 import path from 'node:path'
+import {
+  copilotAnalysisSchema,
+  defaultOpenGaps,
+  type CopilotAnalysis,
+  type DiscoveryStage,
+  discoveryStages,
+  salesCopilotSystemPrompt,
+  type TranscriptTurn,
+} from './copilotPrompt'
 
 type MeetingStatus = 'idle' | 'checking-permissions' | 'recording' | 'paused' | 'stopped'
 
@@ -15,6 +25,34 @@ const isDev = Boolean(process.env.VITE_DEV_SERVER_URL)
 let mainWindow: BrowserWindow | null = null
 let meeting: MeetingSession | null = null
 let meetingTimer: NodeJS.Timeout | null = null
+
+function loadLocalEnv() {
+  const envPath = path.join(process.cwd(), '.env')
+  if (!fs.existsSync(envPath)) {
+    return
+  }
+
+  for (const line of fs.readFileSync(envPath, 'utf8').split(/\r?\n/)) {
+    const trimmed = line.trim()
+    if (!trimmed || trimmed.startsWith('#')) {
+      continue
+    }
+
+    const separatorIndex = trimmed.indexOf('=')
+    if (separatorIndex === -1) {
+      continue
+    }
+
+    const key = trimmed.slice(0, separatorIndex).trim()
+    const rawValue = trimmed.slice(separatorIndex + 1).trim()
+    const value = rawValue.replace(/^['"]|['"]$/g, '')
+    if (key && !process.env[key]) {
+      process.env[key] = value
+    }
+  }
+}
+
+loadLocalEnv()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -110,6 +148,158 @@ async function getPermissionState() {
   }
 }
 
+function parseJsonModelContent(rawContent: string) {
+  try {
+    return JSON.parse(rawContent)
+  } catch {
+    const jsonStart = rawContent.search(/[[{]/)
+    const jsonEnd = Math.max(rawContent.lastIndexOf('}'), rawContent.lastIndexOf(']'))
+    if (jsonStart === -1 || jsonEnd < jsonStart) {
+      throw new Error(`Model response was not JSON: ${rawContent}`)
+    }
+
+    return JSON.parse(rawContent.slice(jsonStart, jsonEnd + 1))
+  }
+}
+
+function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Co-pilot response was not an object.')
+  }
+
+  const record = value as Record<string, unknown>
+  const stage = discoveryStages.includes(record.stage as DiscoveryStage)
+    ? (record.stage as DiscoveryStage)
+    : 'Just here to learn'
+  const nextQuestions = Array.isArray(record.nextQuestions)
+    ? record.nextQuestions
+        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
+        .map((item) => ({
+          priority: item.priority === 'low' || item.priority === 'high' ? item.priority : 'medium',
+          question: typeof item.question === 'string' ? item.question.trim() : '',
+          reason: typeof item.reason === 'string' ? item.reason.trim() : '',
+        }))
+        .filter((item) => item.question && item.reason)
+        .slice(0, 2)
+    : []
+  const facts = Array.isArray(record.facts)
+    ? record.facts
+        .filter((fact): fact is string => typeof fact === 'string' && fact.trim().length > 0)
+        .map((fact) => fact.trim())
+        .slice(0, 8)
+    : []
+  const completedGaps = Array.isArray(record.completedGaps)
+    ? record.completedGaps
+        .filter((gap): gap is string => typeof gap === 'string' && defaultOpenGaps.includes(gap as never))
+        .slice(0, defaultOpenGaps.length)
+    : []
+
+  return {
+    stage,
+    nextQuestions:
+      nextQuestions.length > 0
+        ? nextQuestions
+        : [
+            {
+              priority: 'medium',
+              question: 'Can you walk me through the last time this happened?',
+              reason: 'Gets the call back to a concrete recent instance.',
+            },
+          ],
+    facts,
+    completedGaps,
+  }
+}
+
+function extractResponseText(response: Record<string, unknown>) {
+  if (typeof response.output_text === 'string') {
+    return response.output_text
+  }
+
+  const output = Array.isArray(response.output) ? response.output : []
+  for (const item of output) {
+    if (!item || typeof item !== 'object') {
+      continue
+    }
+
+    const content = Array.isArray((item as Record<string, unknown>).content)
+      ? ((item as Record<string, unknown>).content as unknown[])
+      : []
+    for (const contentItem of content) {
+      if (!contentItem || typeof contentItem !== 'object') {
+        continue
+      }
+
+      const contentRecord = contentItem as Record<string, unknown>
+      if (typeof contentRecord.text === 'string') {
+        return contentRecord.text
+      }
+    }
+  }
+
+  throw new Error('OpenAI response did not include output text.')
+}
+
+async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
+  const apiKey = process.env.OPENAI_API_KEY
+  if (!apiKey) {
+    throw new Error('Missing OPENAI_API_KEY. Add it to .env or your shell environment.')
+  }
+
+  const model = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
+  const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
+  const response = await fetch(`${baseUrl.replace(/\/$/, '')}/responses`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model,
+      store: false,
+      input: [
+        {
+          role: 'system',
+          content: salesCopilotSystemPrompt,
+        },
+        {
+          role: 'user',
+          content: JSON.stringify({
+            currentStage: 'Just here to learn',
+            facts: [],
+            gaps: [...defaultOpenGaps],
+            mossContext: [],
+            transcript: transcript.slice(-40),
+          }),
+        },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'sales_copilot_analysis',
+          strict: true,
+          schema: copilotAnalysisSchema,
+        },
+      },
+    }),
+  })
+
+  const body = (await response.json()) as Record<string, unknown>
+  if (!response.ok) {
+    const error =
+      body.error && typeof body.error === 'object' && 'message' in body.error
+        ? String((body.error as Record<string, unknown>).message)
+        : `OpenAI request failed with status ${response.status}`
+    throw new Error(error)
+  }
+
+  const rawContent = extractResponseText(body)
+  return {
+    model,
+    analysis: parseCopilotAnalysis(parseJsonModelContent(rawContent)),
+  }
+}
+
 ipcMain.handle('permissions:get-state', getPermissionState)
 
 ipcMain.handle('permissions:request-microphone', async () => {
@@ -133,6 +323,10 @@ ipcMain.handle('permissions:open-settings', async (_event, pane: 'microphone' | 
 
   await shell.openExternal(paneUrl)
   return true
+})
+
+ipcMain.handle('ai:analyze-call', async (_event, transcript: TranscriptTurn[]) => {
+  return runCopilotAnalysis(Array.isArray(transcript) ? transcript : [])
 })
 
 ipcMain.handle('meeting:start', async (_event, title?: string) => {

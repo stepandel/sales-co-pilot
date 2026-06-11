@@ -25,10 +25,33 @@ export type MeetingSession = {
   elapsedSeconds: number
 }
 
+export type TranscriptTurn = {
+  speaker: 'rep' | 'prospect'
+  text: string
+  timestamp?: string
+}
+
+export type CopilotAnalysis = {
+  stage: string
+  nextQuestions: Array<{
+    priority: 'low' | 'medium' | 'high'
+    question: string
+    reason: string
+  }>
+  facts: string[]
+  completedGaps: string[]
+}
+
+export type AnalyzeCallResult = {
+  model: string
+  analysis: CopilotAnalysis
+}
+
 export type SalesCopilotApi = {
   getPermissionState: () => Promise<PermissionState>
   requestMicrophonePermission: () => Promise<PermissionState>
   openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') => Promise<boolean>
+  analyzeCall: (transcript: TranscriptTurn[]) => Promise<AnalyzeCallResult>
   startMeeting: (title?: string) => Promise<MeetingSession>
   pauseMeeting: () => Promise<MeetingSession | null>
   stopMeeting: () => Promise<MeetingSession | null>

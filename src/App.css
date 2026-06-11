@@ -473,6 +473,48 @@ code {
   gap: 10px;
 }
 
+.model-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  border-radius: 8px;
+  background: #f3f0e6;
+}
+
+.model-row span {
+  color: #5c574e;
+  font-size: 13px;
+  font-weight: 800;
+}
+
+.model-row button {
+  height: 31px;
+  border: 0;
+  border-radius: 6px;
+  padding: 0 10px;
+  color: #fffaf0;
+  background: #315143;
+  font-size: 13px;
+  font-weight: 800;
+  cursor: pointer;
+}
+
+.model-row button:disabled {
+  cursor: not-allowed;
+  opacity: 0.56;
+}
+
+.copilot-error {
+  padding: 11px 12px;
+  border-radius: 8px;
+  color: #8b2d2b;
+  background: #f2d8d1;
+  font-size: 13px;
+  line-height: 1.45;
+}
+
 .prompt {
   display: grid;
   grid-template-columns: 18px minmax(0, 1fr);
@@ -488,6 +530,26 @@ code {
 .prompt svg {
   color: #315143;
   margin-top: 1px;
+}
+
+.facts-list {
+  display: grid;
+  gap: 8px;
+}
+
+.facts-list h3 {
+  margin-bottom: 2px;
+}
+
+.facts-list span {
+  display: block;
+  padding: 8px 10px;
+  border: 1px solid #e6e0d2;
+  border-radius: 7px;
+  color: #4e4a42;
+  background: #fbfaf6;
+  font-size: 13px;
+  line-height: 1.38;
 }
 
 .integration-card {

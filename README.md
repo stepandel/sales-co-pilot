@@ -9,6 +9,14 @@ deno install
 deno task dev
 ```
 
+For AI coaching, add an OpenAI key:
+
+```bash
+cp .env.example .env
+```
+
+Then set `OPENAI_API_KEY` in `.env`. The default model is `gpt-5.4-mini`.
+
 ## Build
 
 ```bash
@@ -18,6 +26,7 @@ deno task build
 ## Current Architecture
 
 - `electron/main.ts` owns the desktop window, meeting session lifecycle, capture-source discovery, and OS permission helpers.
+- `electron/copilotPrompt.ts` contains the ycmoss-derived discovery prompt and structured output schema.
 - `electron/preload.ts` exposes a narrow `window.salesCopilot` API to the renderer through Electron IPC.
 - `src/App.tsx` is the meeting console UI with capture readiness, meeting controls, transcript display, and AI coaching placeholders.
 - `src/types/electron.d.ts` keeps the renderer API typed.
@@ -36,3 +45,7 @@ Live mic capture can be handled with WebRTC media APIs or a main-process audio p
 - A native Node/Electron module that captures loopback audio on Windows.
 
 Once raw audio frames are available, add a transcription adapter behind the meeting IPC layer, then stream transcript segments back to the renderer with `meeting:updated` or a dedicated `transcript:segment` channel.
+
+## AI Coaching
+
+The renderer sends transcript turns to Electron over `window.salesCopilot.analyzeCall`. Electron reads `OPENAI_API_KEY`, calls the OpenAI Responses API with `OPENAI_MODEL` or `gpt-5.4-mini`, and returns structured co-pilot guidance to the UI. API keys stay in the main process and are not exposed to the renderer.

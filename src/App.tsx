@@ -16,9 +16,31 @@ import {
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import type { MeetingSession, PermissionState } from './types/electron'
+import type { CopilotAnalysis, MeetingSession, PermissionState, TranscriptTurn } from './types/electron'
 
 const demoTranscript = [
+  {
+    speaker: 'Prospect',
+    time: '00:18',
+    text: 'We are trying to reduce handoffs between account executives and implementation.',
+  },
+  {
+    speaker: 'You',
+    time: '00:31',
+    text: 'That makes sense. Where does the process slow down most today?',
+  },
+  {
+    speaker: 'Prospect',
+    time: '00:45',
+    text: 'Usually right after legal approval. Everyone thinks someone else owns the next step.',
+  },
+].map((line) => ({
+  speaker: line.speaker === 'You' ? 'rep' : 'prospect',
+  text: line.text,
+  timestamp: line.time,
+})) satisfies TranscriptTurn[]
+
+const visibleDemoTranscript = [
   {
     speaker: 'Prospect',
     time: '00:18',
@@ -68,11 +90,20 @@ function statusLabel(permission?: string) {
     .join(' ')
 }
 
+function readableError(error: unknown) {
+  const message = error instanceof Error ? error.message : String(error)
+  return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
+}
+
 function App() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
   const [session, setSession] = useState<MeetingSession | null>(null)
   const [permissions, setPermissions] = useState<PermissionState | null>(null)
   const [isLoading, setIsLoading] = useState(false)
+  const [isAnalyzing, setIsAnalyzing] = useState(false)
+  const [copilotModel, setCopilotModel] = useState('gpt-5.4-mini')
+  const [copilotAnalysis, setCopilotAnalysis] = useState<CopilotAnalysis | null>(null)
+  const [copilotError, setCopilotError] = useState('')
   const [audioAccess, setAudioAccess] = useState<AudioAccessState>({
     microphone: 'idle',
     systemAudio: 'idle',
@@ -95,6 +126,10 @@ function App() {
 
     return session.status.charAt(0).toUpperCase() + session.status.slice(1)
   }, [session])
+
+  const visiblePrompts = copilotAnalysis?.nextQuestions.length
+    ? copilotAnalysis.nextQuestions.map((prompt) => prompt.question)
+    : coachingPrompts
 
   useEffect(() => {
     if (!window.salesCopilot) {
@@ -269,6 +304,7 @@ function App() {
       await startAudioStreams()
       setSession(await window.salesCopilot.startMeeting(meetingTitle))
       setPermissions(await window.salesCopilot.getPermissionState())
+      void analyzeCall()
     } catch (error) {
       stopAudioStreams()
       setAudioAccess((current) => ({
@@ -279,6 +315,24 @@ function App() {
       }))
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  async function analyzeCall() {
+    if (!window.salesCopilot) {
+      return
+    }
+
+    setIsAnalyzing(true)
+    setCopilotError('')
+    try {
+      const result = await window.salesCopilot.analyzeCall(demoTranscript)
+      setCopilotModel(result.model)
+      setCopilotAnalysis(result.analysis)
+    } catch (error) {
+      setCopilotError(readableError(error) || 'Co-pilot analysis failed.')
+    } finally {
+      setIsAnalyzing(false)
     }
   }
 
@@ -480,7 +534,7 @@ function App() {
             </div>
 
             <div className="transcript-list">
-              {demoTranscript.map((line) => (
+              {visibleDemoTranscript.map((line) => (
                 <article className="utterance" key={`${line.speaker}-${line.time}`}>
                   <div>
                     <strong>{line.speaker}</strong>
@@ -496,13 +550,22 @@ function App() {
             <div className="section-title">
               <div>
                 <p className="eyebrow">AI co-pilot</p>
-                <h2>Next best moves</h2>
+                <h2>{copilotAnalysis?.stage ?? 'Next best moves'}</h2>
               </div>
               <Sparkles size={20} />
             </div>
 
+            <div className="model-row">
+              <span>{copilotModel}</span>
+              <button type="button" onClick={analyzeCall} disabled={isAnalyzing}>
+                {isAnalyzing ? 'Thinking' : 'Analyze'}
+              </button>
+            </div>
+
+            {copilotError && <p className="copilot-error">{copilotError}</p>}
+
             <div className="prompt-list">
-              {coachingPrompts.map((prompt) => (
+              {visiblePrompts.map((prompt) => (
                 <div className="prompt" key={prompt}>
                   <CheckCircle2 size={17} />
                   <span>{prompt}</span>
@@ -510,9 +573,18 @@ function App() {
               ))}
             </div>
 
+            {copilotAnalysis?.facts.length ? (
+              <div className="facts-list">
+                <h3>Transcript facts</h3>
+                {copilotAnalysis.facts.map((fact) => (
+                  <span key={fact}>{fact}</span>
+                ))}
+              </div>
+            ) : null}
+
             <div className="integration-card">
-              <h3>Scaffolded pipeline</h3>
-              <p>Desktop capture bridge, transcription adapter, meeting memory, and coaching engine boundaries are ready for implementation.</p>
+              <h3>LLM pipeline</h3>
+              <p>Coaching is generated through the Electron main process using OpenAI Responses and the ycmoss discovery prompt.</p>
             </div>
           </aside>
         </section>
