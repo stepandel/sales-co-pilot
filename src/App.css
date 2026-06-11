@@ -468,6 +468,20 @@
   color: #57524a;
 }
 
+/* Bionic reading: each word's fixation prefix sits one weight step above its
+   surroundings (400→600 in plain text, 500→700 inside mark/qw). */
+.ask-question .bx,
+.ask-alt .bx {
+  font-weight: 600;
+}
+
+.ask-question mark .bx,
+.ask-alt mark .bx,
+.ask-question .qw .bx,
+.ask-alt .qw .bx {
+  font-weight: 700;
+}
+
 .ask-reason {
   display: flex;
   gap: 7px;
