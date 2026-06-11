@@ -201,21 +201,33 @@ function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
   const stage = discoveryStages.includes(record.stage as DiscoveryStage)
     ? (record.stage as DiscoveryStage)
     : 'Just here to learn'
-  const nextQuestions = Array.isArray(record.nextQuestions)
-    ? record.nextQuestions
-        .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-        .map((item) => {
-          const question = typeof item.question === 'string' ? item.question.trim() : ''
-          return {
-            priority: parseQuestionPriority(item.priority),
-            question,
-            reason: typeof item.reason === 'string' ? item.reason.trim() : '',
-            emphasis: parseQuestionEmphasis(question, item.emphasis),
-          }
-        })
-        .filter((item) => item.question && item.reason)
-        .slice(0, 2)
-    : []
+  // Single pass: validate, shape, and cap at 2 in one loop instead of
+  // filter().map().filter().slice() walking the list four times.
+  const nextQuestions: CopilotAnalysis['nextQuestions'] = []
+  if (Array.isArray(record.nextQuestions)) {
+    for (const entry of record.nextQuestions) {
+      if (!entry || typeof entry !== 'object') {
+        continue
+      }
+
+      const item = entry as Record<string, unknown>
+      const question = typeof item.question === 'string' ? item.question.trim() : ''
+      const reason = typeof item.reason === 'string' ? item.reason.trim() : ''
+      if (!question || !reason) {
+        continue
+      }
+
+      nextQuestions.push({
+        priority: parseQuestionPriority(item.priority),
+        question,
+        reason,
+        emphasis: parseQuestionEmphasis(question, item.emphasis),
+      })
+      if (nextQuestions.length >= 2) {
+        break
+      }
+    }
+  }
   const facts = Array.isArray(record.facts)
     ? record.facts
         .filter((fact): fact is string => typeof fact === 'string' && fact.trim().length > 0)
