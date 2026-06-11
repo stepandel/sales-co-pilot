@@ -360,6 +360,17 @@ ipcMain.handle('ai:analyze-call', async (_event, transcript: TranscriptTurn[]) =
   return runCopilotAnalysis(Array.isArray(transcript) ? transcript : [])
 })
 
+// Test mode: when test-transcript.txt exists at the project root, the renderer
+// plays it back as the meeting source instead of live audio capture.
+ipcMain.handle('test:get-transcript', () => {
+  const transcriptPath = process.env.TEST_TRANSCRIPT ?? path.join(process.cwd(), 'test-transcript.txt')
+  try {
+    return fs.readFileSync(transcriptPath, 'utf8')
+  } catch {
+    return null
+  }
+})
+
 ipcMain.handle('meeting:start', async (_event, title?: string) => {
   meeting = {
     id: crypto.randomUUID(),

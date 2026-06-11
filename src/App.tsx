@@ -48,6 +48,55 @@ const transcriptForAnalysis = transcriptPreview.map((line) => ({
   timestamp: line.time,
 })) satisfies TranscriptTurn[]
 
+type TestTranscriptLine = {
+  speaker: string
+  isRep: boolean
+  seconds: number
+  time: string
+  text: string
+}
+
+// Test-mode transcript format, one utterance per line:
+//   MM:SS Speaker: text   (or [MM:SS] / H:MM:SS)
+// "You" / "Me" / "Rep" map to the rep side. Lines without a timestamp
+// continue the previous utterance; blank lines and "#" comments are skipped.
+function parseTestTranscript(raw: string): TestTranscriptLine[] {
+  const lines: TestTranscriptLine[] = []
+
+  for (const rawLine of raw.split(/\r?\n/)) {
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) {
+      continue
+    }
+
+    const match = line.match(/^\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?\s+([^:]+):\s*(.+)$/)
+    if (!match) {
+      if (lines.length > 0) {
+        lines[lines.length - 1].text += ` ${line}`
+      }
+      continue
+    }
+
+    const [, first, second, third, rawSpeaker, text] = match
+    const seconds = third
+      ? Number(first) * 3600 + Number(second) * 60 + Number(third)
+      : Number(first) * 60 + Number(second)
+    const speaker = rawSpeaker.trim()
+
+    lines.push({
+      speaker,
+      isRep: /^(you|me|rep)$/i.test(speaker),
+      seconds,
+      time: formatElapsed(seconds),
+      text: text.trim(),
+    })
+  }
+
+  return lines.sort((a, b) => a.seconds - b.seconds)
+}
+
+const AUTO_ANALYZE_INTERVAL_MS = 12_000
+
 type AudioAccessState = {
   microphone: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
   systemAudio: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
@@ -85,10 +134,13 @@ function App() {
     systemAudio: 'idle',
     message: 'Audio access has not been requested yet.',
   })
+  const [testLines, setTestLines] = useState<TestTranscriptLine[]>([])
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
+  const lastAutoAnalyzeRef = useRef({ count: 0, at: 0 })
 
+  const testMode = testLines.length > 0
   const isRecording = session?.status === 'recording'
   const showStart = !session || session.status === 'stopped' || session.status === 'idle'
   const canUseDesktopBridge = Boolean(window.salesCopilot)
@@ -124,12 +176,41 @@ function App() {
   const elapsedSeconds = session?.elapsedSeconds ?? 0
   const shouldWrapSoon = stageIdx >= 5 || elapsedSeconds > TARGET_SECONDS - 90
 
+  // Test mode: the meeting timer "plays" the transcript — a line is revealed
+  // once the session clock passes its timestamp.
+  const revealedLines = useMemo(
+    () => (testMode && session ? testLines.filter((line) => line.seconds <= elapsedSeconds) : []),
+    [testMode, session, testLines, elapsedSeconds],
+  )
+
+  const displayedTranscript = testMode
+    ? revealedLines.map((line) => ({
+        speaker: line.isRep ? 'You' : line.speaker,
+        time: line.time,
+        text: line.text,
+      }))
+    : transcriptPreview
+
+  const analysisTurns: TranscriptTurn[] = testMode
+    ? revealedLines.map((line) => ({
+        speaker: line.isRep ? 'rep' : 'prospect',
+        text: line.text,
+        timestamp: line.time,
+      }))
+    : transcriptForAnalysis
+
   useEffect(() => {
     if (!window.salesCopilot) {
       return
     }
 
     const removeMeetingListener = window.salesCopilot.onMeetingUpdated(setSession)
+
+    window.salesCopilot.getTestTranscript().then((raw) => {
+      if (raw) {
+        setTestLines(parseTestTranscript(raw))
+      }
+    })
 
     return () => {
       removeMeetingListener()
@@ -141,7 +222,22 @@ function App() {
     if (view === 'transcript' && transcriptRef.current) {
       transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
     }
-  }, [view])
+  }, [view, displayedTranscript.length])
+
+  // While a test call plays, re-run the co-pilot as new lines land (throttled),
+  // exactly as live STT would.
+  useEffect(() => {
+    if (!testMode || !isRecording || isAnalyzing) {
+      return
+    }
+
+    const last = lastAutoAnalyzeRef.current
+    if (revealedLines.length > last.count && Date.now() - last.at >= AUTO_ANALYZE_INTERVAL_MS) {
+      lastAutoAnalyzeRef.current = { count: revealedLines.length, at: Date.now() }
+      void analyzeCall()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- analyzeCall is recreated every render; the throttle guard owns when it fires
+  }, [testMode, isRecording, isAnalyzing, revealedLines.length])
 
   function stopAudioStreams() {
     microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
@@ -286,6 +382,18 @@ function App() {
 
     setIsLoading(true)
     try {
+      if (testMode) {
+        lastAutoAnalyzeRef.current = { count: 0, at: 0 }
+        setCopilotAnalysis(null)
+        setCopilotError('')
+        setAudioAccess((current) => ({
+          ...current,
+          message: 'Test mode: playing the transcript file. Audio capture is bypassed.',
+        }))
+        setSession(await window.salesCopilot.startMeeting(meetingTitle))
+        return
+      }
+
       await startAudioStreams()
       setSession(await window.salesCopilot.startMeeting(meetingTitle))
       void analyzeCall()
@@ -310,7 +418,7 @@ function App() {
     setIsAnalyzing(true)
     setCopilotError('')
     try {
-      const result = await window.salesCopilot.analyzeCall(transcriptForAnalysis)
+      const result = await window.salesCopilot.analyzeCall(analysisTurns)
       setCopilotModel(result.model)
       setCopilotAnalysis(result.analysis)
     } catch (error) {
@@ -328,18 +436,22 @@ function App() {
     setIsLoading(true)
     try {
       if (session?.status === 'recording') {
-        stopAudioStreams()
-        setAudioAccess((current) => ({
-          microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
-          systemAudio: current.systemAudio === 'capturing' ? 'ready' : current.systemAudio,
-          message: 'Meeting paused. Audio streams were released.',
-        }))
+        if (!testMode) {
+          stopAudioStreams()
+          setAudioAccess((current) => ({
+            microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
+            systemAudio: current.systemAudio === 'capturing' ? 'ready' : current.systemAudio,
+            message: 'Meeting paused. Audio streams were released.',
+          }))
+        }
         setSession(await window.salesCopilot.pauseMeeting())
         return
       }
 
       if (session?.status === 'paused') {
-        await startAudioStreams()
+        if (!testMode) {
+          await startAudioStreams()
+        }
         setSession(await window.salesCopilot.pauseMeeting())
       }
     } catch (error) {
@@ -360,6 +472,10 @@ function App() {
     }
 
     setSession(await window.salesCopilot.stopMeeting())
+    if (testMode) {
+      return
+    }
+
     stopAudioStreams()
     setAudioAccess((current) => ({
       microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
@@ -374,6 +490,7 @@ function App() {
         <span className={`live-dot ${isRecording ? 'live' : ''}`} />
         <strong className="titlebar-name">Co-pilot</strong>
         <span className="titlebar-status">{meetingStatus}</span>
+        {testMode && <span className="test-badge">Test</span>}
 
         <div className="session-controls">
           {showStart ? (
@@ -539,8 +656,8 @@ function App() {
       ) : (
         <div className="transcript-body" ref={transcriptRef}>
           <p className="transcript-meta">{session?.title ?? 'No active meeting'}</p>
-          {transcriptPreview.map((line) => (
-            <article className="utterance" key={`${line.speaker}-${line.time}`}>
+          {displayedTranscript.map((line, index) => (
+            <article className="utterance" key={`${line.time}-${index}`}>
               <span className="t-time">{line.time}</span>
               <div>
                 <strong className={line.speaker === 'You' ? 'you' : ''}>{line.speaker}</strong>
@@ -548,6 +665,11 @@ function App() {
               </div>
             </article>
           ))}
+          {testMode && displayedTranscript.length === 0 && (
+            <p className="empty-state">
+              {session ? 'Waiting for the first line…' : 'Press Start to play the test transcript.'}
+            </p>
+          )}
         </div>
       )}
 
@@ -567,6 +689,12 @@ function App() {
 
         {setupOpen && (
           <div className="setup-drawer">
+            {testMode && (
+              <p className="test-note">
+                <code>test-transcript.txt</code> found — meetings play this transcript instead of
+                capturing audio. Remove the file to go back to live capture.
+              </p>
+            )}
             <p>{audioAccess.message}</p>
             <div className="setup-actions">
               <button type="button" onClick={requestMicrophone} disabled={isLoading}>
