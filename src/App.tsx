@@ -1,17 +1,28 @@
-import {
-  CheckCircle2,
-  CircleDot,
-  Clock3,
-  Mic,
-  Pause,
-  Play,
-  Square,
-  Sparkles,
-  Volume2,
-} from 'lucide-react'
+import { Mic, Pause, Pin, Play, Settings2, Sparkles, Square, Volume2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import type { CopilotAnalysis, MeetingSession, TranscriptTurn } from './types/electron'
+import type { MeetingSession, TranscriptTurn } from './types/electron'
+import type { CopilotAnalysis } from './types/electron'
+
+const DISCOVERY_STAGES = [
+  { name: 'Just here to learn', short: 'Learn' },
+  { name: 'When did it last happen', short: 'Last time' },
+  { name: 'Quantify the pain', short: 'Pain' },
+  { name: 'What have they tried?', short: 'Tried' },
+  { name: 'Are they already solving it?', short: 'Solving?' },
+  { name: 'Ask for commitment', short: 'Commit' },
+  { name: 'Lock next steps', short: 'Next steps' },
+] as const
+
+const DISCOVERY_GAPS = [
+  'concrete instance',
+  'cost & frequency',
+  'existing workaround / spend',
+  'decision power',
+  'commitment',
+] as const
+
+const TARGET_SECONDS = 8 * 60
 
 const transcriptPreview = [
   {
@@ -57,9 +68,13 @@ function readableError(error: unknown) {
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
+const isMac = navigator.platform.toUpperCase().includes('MAC')
+
 function App() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
   const [session, setSession] = useState<MeetingSession | null>(null)
+  const [view, setView] = useState<'copilot' | 'transcript'>('copilot')
+  const [setupOpen, setSetupOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copilotModel, setCopilotModel] = useState('gpt-5.4-mini')
@@ -72,8 +87,10 @@ function App() {
   })
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
+  const transcriptRef = useRef<HTMLDivElement | null>(null)
 
   const isRecording = session?.status === 'recording'
+  const showStart = !session || session.status === 'stopped' || session.status === 'idle'
   const canUseDesktopBridge = Boolean(window.salesCopilot)
 
   const meetingStatus = useMemo(() => {
@@ -82,13 +99,30 @@ function App() {
     }
 
     if (session.status === 'recording') {
-      return 'Recording live'
+      return 'Live'
     }
 
     return session.status.charAt(0).toUpperCase() + session.status.slice(1)
   }, [session])
 
-  const visiblePrompts = copilotAnalysis?.nextQuestions.map((prompt) => prompt.question) ?? []
+  const stageIdx = useMemo(() => {
+    if (!copilotAnalysis) {
+      return 0
+    }
+
+    const index = DISCOVERY_STAGES.findIndex((stage) => stage.name === copilotAnalysis.stage)
+    return index === -1 ? 0 : index
+  }, [copilotAnalysis])
+
+  const primaryQuestion = copilotAnalysis?.nextQuestions[0] ?? null
+  const secondaryQuestion = copilotAnalysis?.nextQuestions[1] ?? null
+  const completedGaps = useMemo(
+    () => new Set(copilotAnalysis?.completedGaps ?? []),
+    [copilotAnalysis],
+  )
+
+  const elapsedSeconds = session?.elapsedSeconds ?? 0
+  const shouldWrapSoon = stageIdx >= 5 || elapsedSeconds > TARGET_SECONDS - 90
 
   useEffect(() => {
     if (!window.salesCopilot) {
@@ -102,6 +136,12 @@ function App() {
       stopAudioStreams()
     }
   }, [])
+
+  useEffect(() => {
+    if (view === 'transcript' && transcriptRef.current) {
+      transcriptRef.current.scrollTop = transcriptRef.current.scrollHeight
+    }
+  }, [view])
 
   function stopAudioStreams() {
     microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
@@ -329,151 +369,233 @@ function App() {
   }
 
   return (
-    <main className="app-shell">
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <p className="eyebrow">Sales Co-Pilot</p>
-            <h1>Meeting capture and AI coaching.</h1>
-          </div>
-          <div className={`status-pill ${isRecording ? 'live' : ''}`}>
-            <CircleDot size={14} />
-            {meetingStatus}
-          </div>
-        </header>
+    <main className="panel">
+      <header className={`titlebar ${isMac ? 'mac' : ''}`}>
+        <span className={`live-dot ${isRecording ? 'live' : ''}`} />
+        <strong className="titlebar-name">Co-pilot</strong>
+        <span className="titlebar-status">{meetingStatus}</span>
 
-        <section className="meeting-control">
-          <div className="meeting-title">
-            <label htmlFor="meeting-title">Meeting name</label>
-            <input
-              id="meeting-title"
-              value={meetingTitle}
-              onChange={(event) => setMeetingTitle(event.target.value)}
-              disabled={isRecording}
-            />
-          </div>
-
-          <div className="timer">
-            <Clock3 size={18} />
-            <span>{formatElapsed(session?.elapsedSeconds)}</span>
-          </div>
-
-          <div className="meeting-actions">
-            <button className="primary-action" type="button" onClick={startMeeting} disabled={isLoading || isRecording}>
-              <Play size={18} />
-              Start New Meeting
+        <div className="session-controls">
+          {showStart ? (
+            <button
+              className="start-btn"
+              type="button"
+              onClick={startMeeting}
+              disabled={isLoading || !canUseDesktopBridge}
+            >
+              <Play size={12} />
+              Start
             </button>
-            <button className="icon-action" type="button" onClick={pauseMeeting} disabled={isLoading || !session || session.status === 'stopped'}>
-              <Pause size={18} />
-            </button>
-            <button className="icon-action stop" type="button" onClick={stopMeeting} disabled={!session || session.status === 'stopped'}>
-              <Square size={17} />
-            </button>
-          </div>
-        </section>
+          ) : (
+            <>
+              <button
+                className="tb-btn"
+                type="button"
+                onClick={pauseMeeting}
+                disabled={isLoading}
+                title={isRecording ? 'Pause meeting' : 'Resume meeting'}
+              >
+                {isRecording ? <Pause size={13} /> : <Play size={13} />}
+              </button>
+              <button className="tb-btn stop" type="button" onClick={stopMeeting} title="Stop meeting">
+                <Square size={11} />
+              </button>
+            </>
+          )}
+        </div>
 
-        <section className="audio-access-panel">
-          <div className={`access-chip ${audioAccess.microphone}`}>
-            <Mic size={16} />
-            Mic: {audioAccess.microphone}
-          </div>
-          <div className={`access-chip ${audioAccess.systemAudio}`}>
-            <Volume2 size={16} />
-            System: {audioAccess.systemAudio}
-          </div>
-          <p>{audioAccess.message}</p>
-          <button type="button" onClick={requestMicrophone} disabled={isLoading}>
-            Check Mic
-          </button>
-          <button type="button" onClick={requestSystemAudio} disabled={isLoading}>
-            Check System Audio
-          </button>
-          <button
-            type="button"
-            onClick={() => window.salesCopilot?.openPermissionSettings('microphone')}
-          >
-            Mic Settings
-          </button>
-          <button
-            type="button"
-            onClick={() => window.salesCopilot?.openPermissionSettings('screen')}
-          >
-            Screen Settings
-          </button>
-        </section>
+        <Pin size={13} className="titlebar-pin" aria-label="Always on top" />
+      </header>
 
-        {!canUseDesktopBridge && (
-          <div className="browser-warning">
-            Run this inside Electron with <code>deno task dev</code> to enable desktop capture APIs.
-          </div>
-        )}
+      <div className="meeting-row">
+        <input
+          id="meeting-title"
+          value={meetingTitle}
+          onChange={(event) => setMeetingTitle(event.target.value)}
+          disabled={isRecording}
+          placeholder="Meeting name"
+          aria-label="Meeting name"
+        />
+        <span className="timer">
+          {formatElapsed(elapsedSeconds)} <em>/ {formatElapsed(TARGET_SECONDS)}</em>
+        </span>
+      </div>
 
-        <section className="content-grid">
-          <div className="transcript-panel">
-            <div className="section-title">
+      <div className="view-toggle">
+        <button
+          type="button"
+          className={view === 'copilot' ? 'active' : ''}
+          onClick={() => setView('copilot')}
+        >
+          Co-pilot
+        </button>
+        <button
+          type="button"
+          className={view === 'transcript' ? 'active' : ''}
+          onClick={() => setView('transcript')}
+        >
+          Transcript
+        </button>
+      </div>
+
+      {view === 'copilot' ? (
+        <div className="copilot-body">
+          <div className="copilot-content">
+            <div className="stage-head">
               <div>
-                <p className="eyebrow">Transcript preview</p>
-                <h2>{session?.title ?? 'No active meeting'}</h2>
+                <p className="stage-eyebrow">
+                  Stage {stageIdx + 1}/{DISCOVERY_STAGES.length}
+                </p>
+                <h2>{DISCOVERY_STAGES[stageIdx].name}</h2>
               </div>
-              <span>{isRecording ? 'Recording' : 'Preview'}</span>
+              <span className={`pace ${shouldWrapSoon ? 'wrap' : 'on'}`}>
+                {shouldWrapSoon ? 'Wrap soon' : 'On pace'}
+              </span>
             </div>
 
-            <div className="transcript-list">
-              {transcriptPreview.map((line) => (
-                <article className="utterance" key={`${line.speaker}-${line.time}`}>
-                  <div>
-                    <strong>{line.speaker}</strong>
-                    <span>{line.time}</span>
-                  </div>
-                  <p>{line.text}</p>
-                </article>
-              ))}
-            </div>
-          </div>
+            <section className="ask-card">
+              <p className="ask-label">
+                Ask next
+                {primaryQuestion?.priority === 'high' && <em className="prio">High</em>}
+              </p>
+              {primaryQuestion ? (
+                <>
+                  <p className="ask-question">{primaryQuestion.question}</p>
+                  <p className="ask-reason">
+                    <span aria-hidden="true">&#8627;</span> {primaryQuestion.reason}
+                  </p>
+                </>
+              ) : (
+                <p className="ask-empty">
+                  {isAnalyzing ? 'Listening to the call\u2026' : 'Run analysis to get your next question.'}
+                </p>
+              )}
+              {secondaryQuestion && (
+                <div className="ask-alt">
+                  <span>or</span> {secondaryQuestion.question}
+                </div>
+              )}
+            </section>
 
-          <aside className="coach-panel">
-            <div className="section-title">
-              <div>
-                <p className="eyebrow">AI co-pilot</p>
-                <h2>{copilotAnalysis?.stage ?? 'Coaching'}</h2>
+            <section className="gaps">
+              <div className="card-head">
+                <h3>Discovery gaps</h3>
+                <span>
+                  {completedGaps.size}/{DISCOVERY_GAPS.length}
+                </span>
               </div>
-              <Sparkles size={20} />
-            </div>
+              <ul>
+                {DISCOVERY_GAPS.map((gap) => (
+                  <li key={gap} className={completedGaps.has(gap) ? 'done' : ''}>
+                    <span className="gap-check" aria-hidden="true">
+                      {completedGaps.has(gap) ? '\u2713' : ''}
+                    </span>
+                    {gap}
+                  </li>
+                ))}
+              </ul>
+            </section>
 
-            <div className="model-row">
+            <section className="signals">
+              <div className="card-head">
+                <h3>Captured</h3>
+                <span className="good-tag">Good data</span>
+              </div>
+              {copilotAnalysis?.facts.length ? (
+                <ul className="facts">
+                  {copilotAnalysis.facts.map((fact) => (
+                    <li key={fact}>{fact}</li>
+                  ))}
+                </ul>
+              ) : (
+                <p className="empty-state">Facts appear here as the prospect shares specifics.</p>
+              )}
+            </section>
+
+            <div className="analyze-row">
               <span>{copilotModel}</span>
               <button type="button" onClick={analyzeCall} disabled={isAnalyzing}>
-                {isAnalyzing ? 'Thinking' : 'Analyze'}
+                <Sparkles size={13} />
+                {isAnalyzing ? 'Thinking\u2026' : 'Analyze'}
               </button>
             </div>
-
             {copilotError && <p className="copilot-error">{copilotError}</p>}
+          </div>
 
-            {visiblePrompts.length ? (
-              <div className="prompt-list">
-                {visiblePrompts.map((prompt) => (
-                  <div className="prompt" key={prompt}>
-                    <CheckCircle2 size={17} />
-                    <span>{prompt}</span>
-                  </div>
-                ))}
+          <aside className="rail" aria-label="Discovery stages">
+            <div className="rail-line" aria-hidden="true" />
+            {DISCOVERY_STAGES.map((stage, index) => (
+              <div
+                key={stage.name}
+                className={`rail-stage ${index < stageIdx ? 'done' : index === stageIdx ? 'active' : ''}`}
+                title={stage.name}
+              >
+                <span className="rail-label">{stage.short}</span>
+                <span className="rail-dot" />
               </div>
-            ) : (
-              <p className="empty-state">Run analysis to generate coaching from the transcript.</p>
-            )}
-
-            {copilotAnalysis?.facts.length ? (
-              <div className="facts-list">
-                <h3>Transcript facts</h3>
-                {copilotAnalysis.facts.map((fact) => (
-                  <span key={fact}>{fact}</span>
-                ))}
-              </div>
-            ) : null}
-
+            ))}
           </aside>
-        </section>
-      </section>
+        </div>
+      ) : (
+        <div className="transcript-body" ref={transcriptRef}>
+          <p className="transcript-meta">{session?.title ?? 'No active meeting'}</p>
+          {transcriptPreview.map((line) => (
+            <article className="utterance" key={`${line.speaker}-${line.time}`}>
+              <span className="t-time">{line.time}</span>
+              <div>
+                <strong className={line.speaker === 'You' ? 'you' : ''}>{line.speaker}</strong>
+                <p>{line.text}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      )}
+
+      <footer className="setup">
+        <button className="setup-toggle" type="button" onClick={() => setSetupOpen((open) => !open)}>
+          <Settings2 size={13} />
+          Capture setup
+          <span className={`access-chip ${audioAccess.microphone}`}>
+            <Mic size={11} />
+            {audioAccess.microphone}
+          </span>
+          <span className={`access-chip ${audioAccess.systemAudio}`}>
+            <Volume2 size={11} />
+            {audioAccess.systemAudio}
+          </span>
+        </button>
+
+        {setupOpen && (
+          <div className="setup-drawer">
+            <p>{audioAccess.message}</p>
+            <div className="setup-actions">
+              <button type="button" onClick={requestMicrophone} disabled={isLoading}>
+                Check Mic
+              </button>
+              <button type="button" onClick={requestSystemAudio} disabled={isLoading}>
+                Check System Audio
+              </button>
+              <button
+                type="button"
+                onClick={() => window.salesCopilot?.openPermissionSettings('microphone')}
+              >
+                Mic Settings
+              </button>
+              <button
+                type="button"
+                onClick={() => window.salesCopilot?.openPermissionSettings('screen')}
+              >
+                Screen Settings
+              </button>
+            </div>
+            {!canUseDesktopBridge && (
+              <p className="browser-warning">
+                Run this inside Electron with <code>deno task dev</code> to enable desktop capture APIs.
+              </p>
+            )}
+          </div>
+        )}
+      </footer>
     </main>
   )
 }

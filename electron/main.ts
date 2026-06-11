@@ -56,13 +56,15 @@ loadLocalEnv()
 
 function createWindow() {
   mainWindow = new BrowserWindow({
-    width: 1220,
-    height: 820,
-    minWidth: 960,
-    minHeight: 680,
+    width: 384,
+    height: 860,
+    minWidth: 344,
+    minHeight: 600,
+    maxWidth: 520,
     title: 'Sales Co-Pilot',
-    backgroundColor: '#f6f5f1',
+    backgroundColor: '#ffffff',
     titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    alwaysOnTop: true,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -70,6 +72,9 @@ function createWindow() {
       sandbox: false,
     },
   })
+
+  mainWindow.setAlwaysOnTop(true, 'floating')
+  mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
