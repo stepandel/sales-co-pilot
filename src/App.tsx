@@ -1,26 +1,10 @@
-import { History, Mic, Pause, Pin, Play, Settings2, Sparkles, Square, Volume2 } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import type { MeetingSession, TranscriptTurn } from './types/electron'
-import type { CopilotAnalysis } from './types/electron'
-
-const DISCOVERY_STAGES = [
-  { name: 'Just here to learn', short: 'Learn' },
-  { name: 'When did it last happen', short: 'Last time' },
-  { name: 'Quantify the pain', short: 'Pain' },
-  { name: 'What have they tried?', short: 'Tried' },
-  { name: 'Are they already solving it?', short: 'Solving?' },
-  { name: 'Ask for commitment', short: 'Commit' },
-  { name: 'Lock next steps', short: 'Next steps' },
-] as const
-
-const DISCOVERY_GAPS = [
-  'concrete instance',
-  'cost & frequency',
-  'existing workaround / spend',
-  'decision power',
-  'commitment',
-] as const
+import type { CopilotAnalysis, MeetingSession, TranscriptTurn } from './types/electron'
+import { DISCOVERY_STAGES } from './discovery'
+import { CaptureSetup, type AudioAccessState } from './components/CaptureSetup'
+import { CopilotView } from './components/CopilotView'
+import { Titlebar } from './components/Titlebar'
 
 const TARGET_SECONDS = 8 * 60
 
@@ -130,12 +114,6 @@ function parseTestTranscript(raw: string): ParsedTestTranscript {
 const AUTO_ANALYZE_INTERVAL_MS = 12_000
 const TEST_SPEEDS = [1, 4, 8] as const
 
-type AudioAccessState = {
-  microphone: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
-  systemAudio: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
-  message: string
-}
-
 function formatElapsed(seconds = 0) {
   const minutes = Math.floor(seconds / 60)
   const remainingSeconds = seconds % 60
@@ -148,92 +126,6 @@ function formatElapsed(seconds = 0) {
 function readableError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
-}
-
-const QUESTION_WORDS =
-  /\b(?:how(?:\s+(?:much|many|often|long|soon))?|what|when|where|who|whom|whose|why|which)\b/gi
-const LEADING_AUXILIARY =
-  /^(?:do|does|did|can|could|would|will|should|is|are|was|were|have|has|had)\b/i
-const WORD_TOKEN = /^([^\p{L}\p{N}]*)([\p{L}\p{N}'’]+)(.*)$/u
-
-// Bionic reading: bold the first ~40% of each word as a fixation anchor so
-// the eye can skim the question instead of reading it.
-function bionicText(text: string): ReactNode[] {
-  return text.split(/(\s+)/).map((token, index) => {
-    const match = token.match(WORD_TOKEN)
-    if (!match) {
-      return token
-    }
-
-    const [, lead, core, rest] = match
-    const split = core.length <= 3 ? 1 : Math.ceil(core.length * 0.4)
-
-    return (
-      <span key={index}>
-        {lead}
-        <b className="bx">{core.slice(0, split)}</b>
-        {core.slice(split)}
-        {rest}
-      </span>
-    )
-  })
-}
-
-// Interrogative words signal the question's purpose, so they always keep full
-// ink (see .qw in App.css) even when the rest of the question dims.
-function withQuestionWords(text: string, atQuestionStart: boolean): ReactNode[] {
-  const nodes: ReactNode[] = []
-  let cursor = 0
-
-  const lead = atQuestionStart ? text.match(LEADING_AUXILIARY) : null
-  if (lead) {
-    nodes.push(
-      <b className="qw" key="lead">
-        {bionicText(lead[0])}
-      </b>,
-    )
-    cursor = lead[0].length
-  }
-
-  for (const match of text.matchAll(QUESTION_WORDS)) {
-    const index = match.index ?? 0
-    if (index < cursor) {
-      continue
-    }
-
-    if (index > cursor) {
-      nodes.push(<span key={`t${cursor}`}>{bionicText(text.slice(cursor, index))}</span>)
-    }
-    nodes.push(
-      <b className="qw" key={index}>
-        {bionicText(match[0])}
-      </b>,
-    )
-    cursor = index + match[0].length
-  }
-
-  if (cursor < text.length) {
-    nodes.push(<span key={`t${cursor}`}>{bionicText(text.slice(cursor))}</span>)
-  }
-
-  return nodes
-}
-
-// The key span stays full-ink while the rest of the question dims (see
-// .has-key in App.css), so the rep can catch the ask without reading it all.
-function emphasizedQuestion(question: string, emphasis: string) {
-  const index = emphasis ? question.indexOf(emphasis) : -1
-  if (index === -1) {
-    return <>{withQuestionWords(question, true)}</>
-  }
-
-  return (
-    <>
-      {withQuestionWords(question.slice(0, index), true)}
-      <mark>{bionicText(emphasis)}</mark>
-      {withQuestionWords(question.slice(index + emphasis.length), false)}
-    </>
-  )
 }
 
 const isMac = navigator.platform.toUpperCase().includes('MAC')
@@ -266,7 +158,6 @@ function App() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
   const [session, setSession] = useState<MeetingSession | null>(null)
   const [view, setView] = useState<'copilot' | 'transcript'>('copilot')
-  const [setupOpen, setSetupOpen] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copilotModel, setCopilotModel] = useState('gpt-5.4-mini')
@@ -649,62 +540,21 @@ function App() {
 
   return (
     <main className="panel">
-      <header className={`titlebar ${isMac ? 'mac' : ''}`}>
-        <span className={`live-dot ${isRecording ? 'live' : ''}`} />
-        <strong className="titlebar-name">Co-pilot</strong>
-        <span className="titlebar-status">{meetingStatus}</span>
-        {testMode && (
-          <button
-            type="button"
-            className="test-badge"
-            title="Test mode playback speed — click to change"
-            onClick={cycleTestSpeed}
-          >
-            Test {testSpeed}&times;
-          </button>
-        )}
-
-        <div className="session-controls">
-          {showStart ? (
-            <button
-              className="start-btn"
-              type="button"
-              onClick={startMeeting}
-              disabled={isLoading || !canUseDesktopBridge}
-            >
-              <Play size={12} />
-              Start
-            </button>
-          ) : (
-            <>
-              <button
-                className="tb-btn"
-                type="button"
-                onClick={pauseMeeting}
-                disabled={isLoading}
-                title={isRecording ? 'Pause meeting' : 'Resume meeting'}
-              >
-                {isRecording ? <Pause size={13} /> : <Play size={13} />}
-              </button>
-              <button className="tb-btn stop" type="button" onClick={stopMeeting} title="Stop meeting">
-                <Square size={11} />
-              </button>
-            </>
-          )}
-        </div>
-
-        <button
-          className="tb-btn"
-          type="button"
-          onClick={() => window.salesCopilot?.openDashboard()}
-          disabled={!canUseDesktopBridge}
-          title="Open meetings dashboard"
-        >
-          <History size={13} />
-        </button>
-
-        <Pin size={13} className="titlebar-pin" aria-label="Always on top" />
-      </header>
+      <Titlebar
+        isMac={isMac}
+        isRecording={isRecording}
+        meetingStatus={meetingStatus}
+        testMode={testMode}
+        testSpeed={testSpeed}
+        onCycleSpeed={cycleTestSpeed}
+        showStart={showStart}
+        isLoading={isLoading}
+        canUseDesktopBridge={canUseDesktopBridge}
+        onStart={startMeeting}
+        onPause={pauseMeeting}
+        onStop={stopMeeting}
+        onOpenDashboard={() => window.salesCopilot?.openDashboard()}
+      />
 
       <div className="meeting-row">
         <input
@@ -761,107 +611,18 @@ function App() {
       )}
 
       {view === 'copilot' ? (
-        <div className="copilot-body">
-          <div className="copilot-content">
-            <div className="stage-head">
-              <div>
-                <p className="stage-eyebrow">
-                  Stage {stageIdx + 1}/{DISCOVERY_STAGES.length}
-                </p>
-                <h2>{DISCOVERY_STAGES[stageIdx].name}</h2>
-              </div>
-              <span className={`pace ${shouldWrapSoon ? 'wrap' : 'on'}`}>
-                {shouldWrapSoon ? 'Wrap soon' : 'On pace'}
-              </span>
-            </div>
-
-            <section className="ask-card">
-              <p className="ask-label">
-                Ask next
-                {primaryQuestion?.priority === 'high' && <em className="prio">High</em>}
-              </p>
-              {primaryQuestion ? (
-                <>
-                  <p className={`ask-question ${primaryQuestion.emphasis ? 'has-key' : ''}`}>
-                    {emphasizedQuestion(primaryQuestion.question, primaryQuestion.emphasis)}
-                  </p>
-                  <p className="ask-reason">
-                    <span className="reason-arrow" aria-hidden="true">&#8627;</span>
-                    <span className="reason-text">{bionicText(primaryQuestion.reason)}</span>
-                  </p>
-                </>
-              ) : (
-                <p className="ask-empty">
-                  {isAnalyzing ? 'Listening to the call\u2026' : 'Run analysis to get your next question.'}
-                </p>
-              )}
-              {secondaryQuestion && (
-                <div className={`ask-alt ${secondaryQuestion.emphasis ? 'has-key' : ''}`}>
-                  <span className="alt-label">or</span>{' '}
-                  {emphasizedQuestion(secondaryQuestion.question, secondaryQuestion.emphasis)}
-                </div>
-              )}
-            </section>
-
-            <section className="gaps">
-              <div className="card-head">
-                <h3>Discovery gaps</h3>
-                <span>
-                  {completedGaps.size}/{DISCOVERY_GAPS.length}
-                </span>
-              </div>
-              <ul>
-                {DISCOVERY_GAPS.map((gap) => (
-                  <li key={gap} className={completedGaps.has(gap) ? 'done' : ''}>
-                    <span className="gap-check" aria-hidden="true">
-                      {completedGaps.has(gap) ? '\u2713' : ''}
-                    </span>
-                    {gap}
-                  </li>
-                ))}
-              </ul>
-            </section>
-
-            <section className="signals">
-              <div className="card-head">
-                <h3>Captured</h3>
-                <span className="good-tag">Good data</span>
-              </div>
-              {copilotAnalysis?.facts.length ? (
-                <ul className="facts">
-                  {copilotAnalysis.facts.map((fact) => (
-                    <li key={fact}>{fact}</li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="empty-state">Facts appear here as the prospect shares specifics.</p>
-              )}
-            </section>
-
-            <div className="analyze-row">
-              <span>{copilotModel}</span>
-              <button type="button" onClick={analyzeCall} disabled={isAnalyzing}>
-                <Sparkles size={13} />
-                {isAnalyzing ? 'Thinking\u2026' : 'Analyze'}
-              </button>
-            </div>
-            {copilotError && <p className="copilot-error">{copilotError}</p>}
-          </div>
-
-          <aside className="rail" aria-label="Discovery stages">
-            <div className="rail-line" aria-hidden="true" />
-            {DISCOVERY_STAGES.map((stage, index) => (
-              <div
-                key={stage.name}
-                className={`rail-stage ${index < stageIdx ? 'done' : index === stageIdx ? 'active' : ''}`}
-                title={stage.name}
-              >
-                <span className="rail-label">{stage.short}</span>
-                <span className="rail-dot" />
-              </div>
-            ))}
-          </aside>
-        </div>
+        <CopilotView
+          stageIdx={stageIdx}
+          shouldWrapSoon={shouldWrapSoon}
+          primaryQuestion={primaryQuestion}
+          secondaryQuestion={secondaryQuestion}
+          isAnalyzing={isAnalyzing}
+          completedGaps={completedGaps}
+          facts={copilotAnalysis?.facts ?? []}
+          copilotModel={copilotModel}
+          copilotError={copilotError}
+          onAnalyze={analyzeCall}
+        />
       ) : (
         <div className="transcript-body" ref={transcriptRef}>
           <p className="transcript-meta">{session?.title ?? 'No active meeting'}</p>
@@ -882,57 +643,16 @@ function App() {
         </div>
       )}
 
-      <footer className="setup">
-        <button className="setup-toggle" type="button" onClick={() => setSetupOpen((open) => !open)}>
-          <Settings2 size={13} />
-          Capture setup
-          <span className={`access-chip ${audioAccess.microphone}`}>
-            <Mic size={11} />
-            {audioAccess.microphone}
-          </span>
-          <span className={`access-chip ${audioAccess.systemAudio}`}>
-            <Volume2 size={11} />
-            {audioAccess.systemAudio}
-          </span>
-        </button>
-
-        {setupOpen && (
-          <div className="setup-drawer">
-            {testMode && (
-              <p className="test-note">
-                <code>test-transcript.txt</code> found — meetings play this transcript instead of
-                capturing audio. Remove the file to go back to live capture.
-              </p>
-            )}
-            <p>{audioAccess.message}</p>
-            <div className="setup-actions">
-              <button type="button" onClick={requestMicrophone} disabled={isLoading}>
-                Check Mic
-              </button>
-              <button type="button" onClick={requestSystemAudio} disabled={isLoading}>
-                Check System Audio
-              </button>
-              <button
-                type="button"
-                onClick={() => window.salesCopilot?.openPermissionSettings('microphone')}
-              >
-                Mic Settings
-              </button>
-              <button
-                type="button"
-                onClick={() => window.salesCopilot?.openPermissionSettings('screen')}
-              >
-                Screen Settings
-              </button>
-            </div>
-            {!canUseDesktopBridge && (
-              <p className="browser-warning">
-                Run this inside Electron with <code>deno task dev</code> to enable desktop capture APIs.
-              </p>
-            )}
-          </div>
-        )}
-      </footer>
+      <CaptureSetup
+        audioAccess={audioAccess}
+        testMode={testMode}
+        isLoading={isLoading}
+        canUseDesktopBridge={canUseDesktopBridge}
+        onCheckMic={requestMicrophone}
+        onCheckSystemAudio={requestSystemAudio}
+        onOpenMicSettings={() => window.salesCopilot?.openPermissionSettings('microphone')}
+        onOpenScreenSettings={() => window.salesCopilot?.openPermissionSettings('screen')}
+      />
     </main>
   )
 }
