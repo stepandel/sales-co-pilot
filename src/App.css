@@ -493,10 +493,14 @@
   color: #8a857c;
 }
 
-.ask-reason span {
+.ask-reason .reason-arrow {
   color: var(--green);
   font-style: normal;
   flex: none;
+}
+
+.ask-reason .bx {
+  font-weight: 600;
 }
 
 .ask-empty {
@@ -525,7 +529,7 @@
   color: #57524a;
 }
 
-.ask-alt span {
+.ask-alt .alt-label {
   font-family: var(--font-ui);
   font-size: 9px;
   font-weight: 800;

@@ -765,7 +765,8 @@ function App() {
                     {emphasizedQuestion(primaryQuestion.question, primaryQuestion.emphasis)}
                   </p>
                   <p className="ask-reason">
-                    <span aria-hidden="true">&#8627;</span> {primaryQuestion.reason}
+                    <span className="reason-arrow" aria-hidden="true">&#8627;</span>
+                    <span className="reason-text">{bionicText(primaryQuestion.reason)}</span>
                   </p>
                 </>
               ) : (
@@ -775,7 +776,7 @@ function App() {
               )}
               {secondaryQuestion && (
                 <div className={`ask-alt ${secondaryQuestion.emphasis ? 'has-key' : ''}`}>
-                  <span>or</span>{' '}
+                  <span className="alt-label">or</span>{' '}
                   {emphasizedQuestion(secondaryQuestion.question, secondaryQuestion.emphasis)}
                 </div>
               )}
