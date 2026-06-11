@@ -150,6 +150,23 @@ function readableError(error: unknown) {
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
 }
 
+// The key span stays full-ink while the rest of the question dims (see
+// .has-key in App.css), so the rep can catch the ask without reading it all.
+function emphasizedQuestion(question: string, emphasis: string) {
+  const index = emphasis ? question.indexOf(emphasis) : -1
+  if (index === -1) {
+    return question
+  }
+
+  return (
+    <>
+      {question.slice(0, index)}
+      <mark>{emphasis}</mark>
+      {question.slice(index + emphasis.length)}
+    </>
+  )
+}
+
 const isMac = navigator.platform.toUpperCase().includes('MAC')
 
 function App() {
@@ -675,7 +692,9 @@ function App() {
               </p>
               {primaryQuestion ? (
                 <>
-                  <p className="ask-question">{primaryQuestion.question}</p>
+                  <p className={`ask-question ${primaryQuestion.emphasis ? 'has-key' : ''}`}>
+                    {emphasizedQuestion(primaryQuestion.question, primaryQuestion.emphasis)}
+                  </p>
                   <p className="ask-reason">
                     <span aria-hidden="true">&#8627;</span> {primaryQuestion.reason}
                   </p>
@@ -686,8 +705,9 @@ function App() {
                 </p>
               )}
               {secondaryQuestion && (
-                <div className="ask-alt">
-                  <span>or</span> {secondaryQuestion.question}
+                <div className={`ask-alt ${secondaryQuestion.emphasis ? 'has-key' : ''}`}>
+                  <span>or</span>{' '}
+                  {emphasizedQuestion(secondaryQuestion.question, secondaryQuestion.emphasis)}
                 </div>
               )}
             </section>

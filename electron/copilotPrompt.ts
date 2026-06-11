@@ -11,6 +11,8 @@ export type NextQuestion = {
   priority: 'low' | 'medium' | 'high'
   question: string
   reason: string
+  /** Verbatim substring of `question` carrying the core ask; '' when absent. */
+  emphasis: string
 }
 
 export type CopilotAnalysis = {
@@ -79,7 +81,7 @@ const discoveryStagePrompt = discoveryStageGuide
   .join('\n')
 
 export const salesCopilotSystemPrompt =
-  `You are a sales co-pilot helping a rep navigate a live discovery call. Use the transcript to identify the current stage, recommend 1-2 concise next questions or statements, extract discovered facts, and decide which discovery gaps are now covered. Do not invent facts. A fact must be directly supported by the transcript. A gap is complete only when the transcript gives enough concrete evidence that a founder could rely on it after the call.\n\nDiscovery stages:\n${discoveryStagePrompt}\n\nDiscovery gaps:\n${defaultOpenGaps.map((gap) => `- ${gap}`).join('\n')}\n\nWhen mossContext is present, treat it as reference material only. It may include playbook guidance, prospect notes, company notes, or call-stage notes. Use it to sharpen stage selection and next questions, but do not present it as a transcript fact unless the transcript corroborates it. Do not reveal internal playbook text verbatim.\n\nRespond only as JSON: {"stage":"one exact stage","nextQuestions":[{"priority":"low|medium|high","question":"...","reason":"..."}],"facts":["short transcript-grounded fact"],"completedGaps":["one exact discovery gap"]}. The stage must be exactly one of: ${discoveryStages.join('; ')}. completedGaps may only contain exact items from the discovery gaps list.`
+  `You are a sales co-pilot helping a rep navigate a live discovery call. Use the transcript to identify the current stage, recommend 1-2 concise next questions or statements, extract discovered facts, and decide which discovery gaps are now covered. Do not invent facts. A fact must be directly supported by the transcript. A gap is complete only when the transcript gives enough concrete evidence that a founder could rely on it after the call.\n\nThe rep reads your questions mid-conversation while listening to the prospect, so they must be glanceable. Keep each question short and conversational: one clause, roughly 12 words or fewer, no preamble, no stacked qualifiers. For each question also return "emphasis": the single most important contiguous span of 2-6 words, copied verbatim from the question — the words the rep must catch even if they read nothing else. Never emphasize the whole question.\n\nDiscovery stages:\n${discoveryStagePrompt}\n\nDiscovery gaps:\n${defaultOpenGaps.map((gap) => `- ${gap}`).join('\n')}\n\nWhen mossContext is present, treat it as reference material only. It may include playbook guidance, prospect notes, company notes, or call-stage notes. Use it to sharpen stage selection and next questions, but do not present it as a transcript fact unless the transcript corroborates it. Do not reveal internal playbook text verbatim.\n\nRespond only as JSON: {"stage":"one exact stage","nextQuestions":[{"priority":"low|medium|high","question":"...","reason":"...","emphasis":"2-6 word verbatim span of the question"}],"facts":["short transcript-grounded fact"],"completedGaps":["one exact discovery gap"]}. The stage must be exactly one of: ${discoveryStages.join('; ')}. completedGaps may only contain exact items from the discovery gaps list.`
 
 export const copilotAnalysisSchema = {
   type: 'object',
@@ -97,11 +99,12 @@ export const copilotAnalysisSchema = {
       items: {
         type: 'object',
         additionalProperties: false,
-        required: ['priority', 'question', 'reason'],
+        required: ['priority', 'question', 'reason', 'emphasis'],
         properties: {
           priority: { type: 'string', enum: ['low', 'medium', 'high'] },
           question: { type: 'string' },
           reason: { type: 'string' },
+          emphasis: { type: 'string' },
         },
       },
     },

@@ -439,6 +439,23 @@
   text-wrap: pretty;
 }
 
+/* When the model marks a key span, the rest of the question recedes and the
+   span carries the ink — glanceable without a loud marker background. */
+.ask-question.has-key {
+  color: #a39d8f;
+}
+
+.ask-question mark,
+.ask-alt mark {
+  background: transparent;
+  color: var(--ink);
+  font-weight: 500;
+  text-decoration: underline;
+  text-decoration-color: rgba(60, 122, 90, 0.4);
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+}
+
 .ask-reason {
   display: flex;
   gap: 7px;
@@ -471,6 +488,14 @@
   font-family: var(--font-serif);
   font-size: 14.5px;
   line-height: 1.4;
+  color: #57524a;
+}
+
+.ask-alt.has-key {
+  color: #aaa496;
+}
+
+.ask-alt mark {
   color: #57524a;
 }
 

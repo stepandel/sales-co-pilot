@@ -37,6 +37,8 @@ export type CopilotAnalysis = {
     priority: 'low' | 'medium' | 'high'
     question: string
     reason: string
+    /** Verbatim span of `question` carrying the core ask; '' when absent. */
+    emphasis: string
   }>
   facts: string[]
   completedGaps: string[]

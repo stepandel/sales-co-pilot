@@ -180,6 +180,18 @@ function parseQuestionPriority(value: unknown): 'low' | 'medium' | 'high' {
   return value === 'low' || value === 'medium' || value === 'high' ? value : 'medium'
 }
 
+// The emphasis is only usable if it is a real span of the question; return it
+// in the question's exact casing, or '' so the UI renders the question plain.
+function parseQuestionEmphasis(question: string, value: unknown): string {
+  const emphasis = typeof value === 'string' ? value.trim() : ''
+  if (!emphasis || emphasis.length >= question.length) {
+    return ''
+  }
+
+  const index = question.toLowerCase().indexOf(emphasis.toLowerCase())
+  return index === -1 ? '' : question.slice(index, index + emphasis.length)
+}
+
 function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
   if (!value || typeof value !== 'object') {
     throw new Error('Co-pilot response was not an object.')
@@ -192,11 +204,15 @@ function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
   const nextQuestions = Array.isArray(record.nextQuestions)
     ? record.nextQuestions
         .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
-        .map((item) => ({
-          priority: parseQuestionPriority(item.priority),
-          question: typeof item.question === 'string' ? item.question.trim() : '',
-          reason: typeof item.reason === 'string' ? item.reason.trim() : '',
-        }))
+        .map((item) => {
+          const question = typeof item.question === 'string' ? item.question.trim() : ''
+          return {
+            priority: parseQuestionPriority(item.priority),
+            question,
+            reason: typeof item.reason === 'string' ? item.reason.trim() : '',
+            emphasis: parseQuestionEmphasis(question, item.emphasis),
+          }
+        })
         .filter((item) => item.question && item.reason)
         .slice(0, 2)
     : []
@@ -222,6 +238,7 @@ function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
               priority: 'medium',
               question: 'Can you walk me through the last time this happened?',
               reason: 'Gets the call back to a concrete recent instance.',
+              emphasis: 'the last time this happened',
             },
           ],
     facts,
