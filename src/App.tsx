@@ -1,24 +1,19 @@
 import {
-  Bot,
   CheckCircle2,
   CircleDot,
   Clock3,
   Mic,
-  MonitorUp,
   Pause,
-  PhoneCall,
   Play,
-  Radio,
-  ShieldCheck,
   Square,
   Sparkles,
   Volume2,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
-import type { CopilotAnalysis, MeetingSession, PermissionState, TranscriptTurn } from './types/electron'
+import type { CopilotAnalysis, MeetingSession, TranscriptTurn } from './types/electron'
 
-const demoTranscript = [
+const transcriptPreview = [
   {
     speaker: 'Prospect',
     time: '00:18',
@@ -34,35 +29,13 @@ const demoTranscript = [
     time: '00:45',
     text: 'Usually right after legal approval. Everyone thinks someone else owns the next step.',
   },
-].map((line) => ({
+]
+
+const transcriptForAnalysis = transcriptPreview.map((line) => ({
   speaker: line.speaker === 'You' ? 'rep' : 'prospect',
   text: line.text,
   timestamp: line.time,
 })) satisfies TranscriptTurn[]
-
-const visibleDemoTranscript = [
-  {
-    speaker: 'Prospect',
-    time: '00:18',
-    text: 'We are trying to reduce handoffs between account executives and implementation.',
-  },
-  {
-    speaker: 'You',
-    time: '00:31',
-    text: 'That makes sense. Where does the process slow down most today?',
-  },
-  {
-    speaker: 'Prospect',
-    time: '00:45',
-    text: 'Usually right after legal approval. Everyone thinks someone else owns the next step.',
-  },
-]
-
-const coachingPrompts = [
-  'Ask who owns the post-signature handoff today.',
-  'Quantify the delay in days and revenue impact.',
-  'Confirm whether legal approval is the buying trigger.',
-]
 
 type AudioAccessState = {
   microphone: 'idle' | 'checking' | 'ready' | 'capturing' | 'denied'
@@ -79,17 +52,6 @@ function formatElapsed(seconds = 0) {
     .padStart(2, '0')}`
 }
 
-function statusLabel(permission?: string) {
-  if (!permission || permission === 'unknown') {
-    return 'Ready to check'
-  }
-
-  return permission
-    .split('-')
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
-}
-
 function readableError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
   return message.replace(/^Error invoking remote method '[^']+': Error: /, '')
@@ -98,7 +60,6 @@ function readableError(error: unknown) {
 function App() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
   const [session, setSession] = useState<MeetingSession | null>(null)
-  const [permissions, setPermissions] = useState<PermissionState | null>(null)
   const [isLoading, setIsLoading] = useState(false)
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [copilotModel, setCopilotModel] = useState('gpt-5.4-mini')
@@ -127,16 +88,13 @@ function App() {
     return session.status.charAt(0).toUpperCase() + session.status.slice(1)
   }, [session])
 
-  const visiblePrompts = copilotAnalysis?.nextQuestions.length
-    ? copilotAnalysis.nextQuestions.map((prompt) => prompt.question)
-    : coachingPrompts
+  const visiblePrompts = copilotAnalysis?.nextQuestions.map((prompt) => prompt.question) ?? []
 
   useEffect(() => {
     if (!window.salesCopilot) {
       return
     }
 
-    window.salesCopilot.getPermissionState().then(setPermissions).catch(console.error)
     const removeMeetingListener = window.salesCopilot.onMeetingUpdated(setSession)
 
     return () => {
@@ -174,19 +132,6 @@ function App() {
     })
   }
 
-  async function refreshPermissions() {
-    if (!window.salesCopilot) {
-      return
-    }
-
-    setIsLoading(true)
-    try {
-      setPermissions(await window.salesCopilot.getPermissionState())
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
   async function requestMicrophone() {
     if (!window.salesCopilot || !navigator.mediaDevices?.getUserMedia) {
       return
@@ -200,7 +145,7 @@ function App() {
     }))
 
     try {
-      setPermissions(await window.salesCopilot.requestMicrophonePermission())
+      await window.salesCopilot.requestMicrophonePermission()
       const stream = await getMicrophoneStream()
       const hasAudio = stream.getAudioTracks().length > 0
       stream.getTracks().forEach((track) => track.stop())
@@ -303,7 +248,6 @@ function App() {
     try {
       await startAudioStreams()
       setSession(await window.salesCopilot.startMeeting(meetingTitle))
-      setPermissions(await window.salesCopilot.getPermissionState())
       void analyzeCall()
     } catch (error) {
       stopAudioStreams()
@@ -326,7 +270,7 @@ function App() {
     setIsAnalyzing(true)
     setCopilotError('')
     try {
-      const result = await window.salesCopilot.analyzeCall(demoTranscript)
+      const result = await window.salesCopilot.analyzeCall(transcriptForAnalysis)
       setCopilotModel(result.model)
       setCopilotAnalysis(result.analysis)
     } catch (error) {
@@ -386,70 +330,11 @@ function App() {
 
   return (
     <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand">
-          <div className="brand-mark">
-            <Radio size={19} />
-          </div>
-          <div>
-            <strong>Sales Co-Pilot</strong>
-            <span>Live call intelligence</span>
-          </div>
-        </div>
-
-        <nav className="nav-list" aria-label="Primary">
-          <button className="nav-item active" type="button">
-            <PhoneCall size={18} />
-            Meetings
-          </button>
-          <button className="nav-item" type="button">
-            <Bot size={18} />
-            Coaching
-          </button>
-          <button className="nav-item" type="button">
-            <ShieldCheck size={18} />
-            Setup
-          </button>
-        </nav>
-
-        <div className="setup-panel">
-          <div className="panel-heading">
-            <span>Capture Readiness</span>
-            <button type="button" onClick={refreshPermissions} disabled={isLoading}>
-              Check
-            </button>
-          </div>
-
-          <div className="check-row">
-            <Mic size={17} />
-            <span>Microphone</span>
-            <b>{statusLabel(permissions?.microphone)}</b>
-          </div>
-          <div className="check-row">
-            <MonitorUp size={17} />
-            <span>Screen source</span>
-            <b>{statusLabel(permissions?.screen)}</b>
-          </div>
-          <div className="check-row">
-            <Volume2 size={17} />
-            <span>System audio</span>
-            <b>{audioAccess.systemAudio === 'capturing' ? 'Capturing' : 'Loopback'}</b>
-          </div>
-
-          <button className="secondary-action" type="button" onClick={requestMicrophone} disabled={isLoading}>
-            Request Mic Access
-          </button>
-          <button className="secondary-action" type="button" onClick={requestSystemAudio} disabled={isLoading}>
-            Request System Audio
-          </button>
-        </div>
-      </aside>
-
       <section className="workspace">
         <header className="topbar">
           <div>
-            <p className="eyebrow">Meeting console</p>
-            <h1>Start a call, capture audio, and coach the conversation.</h1>
+            <p className="eyebrow">Sales Co-Pilot</p>
+            <h1>Meeting capture and AI coaching.</h1>
           </div>
           <div className={`status-pill ${isRecording ? 'live' : ''}`}>
             <CircleDot size={14} />
@@ -497,6 +382,12 @@ function App() {
             System: {audioAccess.systemAudio}
           </div>
           <p>{audioAccess.message}</p>
+          <button type="button" onClick={requestMicrophone} disabled={isLoading}>
+            Check Mic
+          </button>
+          <button type="button" onClick={requestSystemAudio} disabled={isLoading}>
+            Check System Audio
+          </button>
           <button
             type="button"
             onClick={() => window.salesCopilot?.openPermissionSettings('microphone')}
@@ -521,20 +412,14 @@ function App() {
           <div className="transcript-panel">
             <div className="section-title">
               <div>
-                <p className="eyebrow">Live transcript</p>
+                <p className="eyebrow">Transcript preview</p>
                 <h2>{session?.title ?? 'No active meeting'}</h2>
               </div>
-              <span>{isRecording ? 'Streaming' : 'Standby'}</span>
-            </div>
-
-            <div className="waveform" aria-hidden="true">
-              {Array.from({ length: 32 }).map((_, index) => (
-                <i key={index} style={{ height: `${22 + ((index * 17) % 56)}px` }} />
-              ))}
+              <span>{isRecording ? 'Recording' : 'Preview'}</span>
             </div>
 
             <div className="transcript-list">
-              {visibleDemoTranscript.map((line) => (
+              {transcriptPreview.map((line) => (
                 <article className="utterance" key={`${line.speaker}-${line.time}`}>
                   <div>
                     <strong>{line.speaker}</strong>
@@ -550,7 +435,7 @@ function App() {
             <div className="section-title">
               <div>
                 <p className="eyebrow">AI co-pilot</p>
-                <h2>{copilotAnalysis?.stage ?? 'Next best moves'}</h2>
+                <h2>{copilotAnalysis?.stage ?? 'Coaching'}</h2>
               </div>
               <Sparkles size={20} />
             </div>
@@ -564,14 +449,18 @@ function App() {
 
             {copilotError && <p className="copilot-error">{copilotError}</p>}
 
-            <div className="prompt-list">
-              {visiblePrompts.map((prompt) => (
-                <div className="prompt" key={prompt}>
-                  <CheckCircle2 size={17} />
-                  <span>{prompt}</span>
-                </div>
-              ))}
-            </div>
+            {visiblePrompts.length ? (
+              <div className="prompt-list">
+                {visiblePrompts.map((prompt) => (
+                  <div className="prompt" key={prompt}>
+                    <CheckCircle2 size={17} />
+                    <span>{prompt}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="empty-state">Run analysis to generate coaching from the transcript.</p>
+            )}
 
             {copilotAnalysis?.facts.length ? (
               <div className="facts-list">
@@ -582,10 +471,6 @@ function App() {
               </div>
             ) : null}
 
-            <div className="integration-card">
-              <h3>LLM pipeline</h3>
-              <p>Coaching is generated through the Electron main process using OpenAI Responses and the ycmoss discovery prompt.</p>
-            </div>
           </aside>
         </section>
       </section>
