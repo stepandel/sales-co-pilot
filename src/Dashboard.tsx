@@ -58,6 +58,9 @@ function Dashboard() {
   // Without the desktop bridge there is nothing to load, so start "loaded".
   const [isLoaded, setIsLoaded] = useState(() => !window.salesCopilot)
   const [importError, setImportError] = useState('')
+  const [analyzingId, setAnalyzingId] = useState<string | null>(null)
+  // Keyed by meeting id so the message only shows on the meeting it belongs to.
+  const [analyzeError, setAnalyzeError] = useState<{ id: string; message: string } | null>(null)
 
   useEffect(() => {
     const bridge = window.salesCopilot
@@ -111,6 +114,28 @@ function Dashboard() {
   async function deleteMeeting(id: string) {
     await window.salesCopilot?.deleteMeeting(id)
     // The meetings:changed broadcast triggers refresh; nothing else to do.
+  }
+
+  // Run the co-pilot over a stored meeting's transcript; works for imported
+  // calls and re-analyzes already-analyzed ones.
+  async function analyzeMeeting(id: string) {
+    if (!window.salesCopilot) {
+      return
+    }
+
+    setAnalyzingId(id)
+    setAnalyzeError(null)
+    try {
+      const result = await window.salesCopilot.analyzeMeeting(id)
+      if ('error' in result) {
+        setAnalyzeError({ id, message: result.error })
+        return
+      }
+
+      setLoadedRecord(result.record)
+    } finally {
+      setAnalyzingId(null)
+    }
   }
 
   // Pick a transcript file; the main process parses and stores it, and the
@@ -241,15 +266,37 @@ function Dashboard() {
                     )}
                   </p>
                 </div>
-                <button
-                  type="button"
-                  className="dash-delete"
-                  title="Delete meeting"
-                  onClick={() => void deleteMeeting(record.id)}
-                >
-                  <Trash2 size={14} />
-                </button>
+                <div className="dash-detail-actions">
+                  <button
+                    type="button"
+                    className="dash-analyze"
+                    disabled={analyzingId !== null}
+                    title="Run the co-pilot over this transcript"
+                    onClick={() => void analyzeMeeting(record.id)}
+                  >
+                    <Sparkles size={13} />
+                    {analyzingId === record.id
+                      ? 'Analyzing…'
+                      : record.analysis
+                        ? 'Re-analyze'
+                        : 'Analyze'}
+                  </button>
+                  <button
+                    type="button"
+                    className="dash-delete"
+                    title="Delete meeting"
+                    onClick={() => void deleteMeeting(record.id)}
+                  >
+                    <Trash2 size={14} />
+                  </button>
+                </div>
               </header>
+
+              {analyzeError?.id === record.id && (
+                <p className="dash-analyze-error" role="alert">
+                  {analyzeError.message}
+                </p>
+              )}
 
               <div className="dash-columns">
                 <div className="dash-col">

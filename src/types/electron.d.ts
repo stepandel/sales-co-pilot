@@ -93,6 +93,7 @@ export type SalesCopilotApi = {
   importTranscript: () => Promise<{ id: string } | { error: string } | null>
   listMeetings: () => Promise<MeetingSummary[]>
   getMeeting: (id: string) => Promise<MeetingRecord | null>
+  analyzeMeeting: (id: string) => Promise<{ record: MeetingRecord } | { error: string }>
   deleteMeeting: (id: string) => Promise<boolean>
   openDashboard: () => Promise<boolean>
   onMeetingUpdated: (callback: (session: MeetingSession | null) => void) => () => void

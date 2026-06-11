@@ -696,6 +696,32 @@ ipcMain.handle('meetings:get', (_event, id: string) => {
   return { ...record, transcript: readTranscriptTurns(id) ?? record.transcript ?? [] }
 })
 
+// Run the co-pilot over a stored meeting's transcript (imported calls, or
+// re-analysis of any finished one) and persist the result on its record.
+ipcMain.handle('meetings:analyze', async (_event, id: string) => {
+  const records = readMeetingRecords()
+  const record = records.find((entry) => entry.id === id)
+  if (!record) {
+    return { error: 'Meeting not found.' }
+  }
+
+  const turns = readTranscriptTurns(id) ?? record.transcript ?? []
+  if (turns.length === 0) {
+    return { error: 'This meeting has no transcript to analyze.' }
+  }
+
+  try {
+    const { model, analysis } = await runCopilotAnalysis(turns)
+    record.analysis = analysis
+    record.model = model
+    writeMeetingRecords(records)
+    broadcastMeetingsChanged()
+    return { record: { ...record, transcript: turns } }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Analysis failed.' }
+  }
+})
+
 ipcMain.handle('meetings:delete', (_event, id: string) => {
   const records = readMeetingRecords()
   const remaining = records.filter((record) => record.id !== id)

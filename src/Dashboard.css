@@ -272,6 +272,47 @@
   color: var(--ink-3);
 }
 
+.dash-detail-actions {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.dash-analyze {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 12px;
+  border-radius: 9px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  font: inherit;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--ink-2);
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.dash-analyze:hover:not(:disabled) {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+.dash-analyze:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+
+.dash-analyze-error {
+  margin: -8px 0 14px;
+  font-size: 11.5px;
+  font-weight: 600;
+  color: var(--red);
+}
+
 .dash-delete {
   flex: none;
   display: flex;
