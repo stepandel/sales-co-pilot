@@ -162,6 +162,10 @@ function parseJsonModelContent(rawContent: string) {
   }
 }
 
+function parseQuestionPriority(value: unknown): 'low' | 'medium' | 'high' {
+  return value === 'low' || value === 'medium' || value === 'high' ? value : 'medium'
+}
+
 function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
   if (!value || typeof value !== 'object') {
     throw new Error('Co-pilot response was not an object.')
@@ -175,7 +179,7 @@ function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
     ? record.nextQuestions
         .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === 'object')
         .map((item) => ({
-          priority: item.priority === 'low' || item.priority === 'high' ? item.priority : 'medium',
+          priority: parseQuestionPriority(item.priority),
           question: typeof item.question === 'string' ? item.question.trim() : '',
           reason: typeof item.reason === 'string' ? item.reason.trim() : '',
         }))
