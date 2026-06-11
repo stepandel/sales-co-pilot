@@ -1,4 +1,4 @@
-import { Mic, Pause, Pin, Play, Settings2, Sparkles, Square, Volume2 } from 'lucide-react'
+import { History, Mic, Pause, Pin, Play, Settings2, Sparkles, Square, Volume2 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import './App.css'
 import type { MeetingSession, TranscriptTurn } from './types/electron'
@@ -625,7 +625,16 @@ function App() {
       return
     }
 
-    setSession(await window.salesCopilot.stopMeeting())
+    // Persist the finished call (transcript + latest analysis) so it shows
+    // up in the meetings dashboard.
+    setSession(
+      await window.salesCopilot.stopMeeting({
+        durationSeconds: callSeconds,
+        transcript: analysisTurns,
+        analysis: copilotAnalysis,
+        model: copilotAnalysis ? copilotModel : null,
+      }),
+    )
     if (testMode) {
       return
     }
@@ -683,6 +692,16 @@ function App() {
             </>
           )}
         </div>
+
+        <button
+          className="tb-btn"
+          type="button"
+          onClick={() => window.salesCopilot?.openDashboard()}
+          disabled={!canUseDesktopBridge}
+          title="Open meetings dashboard"
+        >
+          <History size={13} />
+        </button>
 
         <Pin size={13} className="titlebar-pin" aria-label="Always on top" />
       </header>

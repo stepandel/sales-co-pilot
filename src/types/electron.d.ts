@@ -49,6 +49,36 @@ export type AnalyzeCallResult = {
   analysis: CopilotAnalysis
 }
 
+export type StopMeetingPayload = {
+  durationSeconds?: number
+  transcript?: TranscriptTurn[]
+  analysis?: CopilotAnalysis | null
+  model?: string | null
+}
+
+export type MeetingRecord = {
+  id: string
+  title: string
+  startedAt: string
+  endedAt: string
+  durationSeconds: number
+  transcript: TranscriptTurn[]
+  analysis: CopilotAnalysis | null
+  model: string | null
+}
+
+export type MeetingSummary = {
+  id: string
+  title: string
+  startedAt: string
+  endedAt: string
+  durationSeconds: number
+  turnCount: number
+  stage: string | null
+  completedGaps: string[]
+  factCount: number
+}
+
 export type SalesCopilotApi = {
   getPermissionState: () => Promise<PermissionState>
   requestMicrophonePermission: () => Promise<PermissionState>
@@ -57,8 +87,13 @@ export type SalesCopilotApi = {
   getTestTranscript: () => Promise<string | null>
   startMeeting: (title?: string) => Promise<MeetingSession>
   pauseMeeting: () => Promise<MeetingSession | null>
-  stopMeeting: () => Promise<MeetingSession | null>
+  stopMeeting: (payload?: StopMeetingPayload) => Promise<MeetingSession | null>
+  listMeetings: () => Promise<MeetingSummary[]>
+  getMeeting: (id: string) => Promise<MeetingRecord | null>
+  deleteMeeting: (id: string) => Promise<boolean>
+  openDashboard: () => Promise<boolean>
   onMeetingUpdated: (callback: (session: MeetingSession | null) => void) => () => void
+  onMeetingsChanged: (callback: () => void) => () => void
 }
 
 declare global {
