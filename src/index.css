@@ -1,3 +1,25 @@
+/* Shared design tokens — used by both the rail panel (App.css)
+   and the meetings dashboard (Dashboard.css). */
+:root {
+  --paper: #faf8f3;
+  --surface: #ffffff;
+  --sand: #f4efe4;
+  --ink: #211e1a;
+  --ink-2: #6f6a60;
+  --ink-3: #a8a296;
+  --ink-faint: #b0aa9e;
+  --line: #ece8df;
+  --line-soft: #f0ece3;
+  --clay: #c2613a;
+  --green: #3c7a5a;
+  --green-bg: #e9f2ec;
+  --amber: #9a6f14;
+  --amber-bg: #faf1dd;
+  --red: #b3402f;
+  --font-ui: 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  --font-serif: 'Newsreader', Georgia, 'Times New Roman', serif;
+}
+
 :root {
   font-family:
     'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,

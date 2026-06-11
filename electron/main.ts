@@ -21,8 +21,27 @@ type MeetingSession = {
   elapsedSeconds: number
 }
 
+type MeetingRecord = {
+  id: string
+  title: string
+  startedAt: string
+  endedAt: string
+  durationSeconds: number
+  transcript: TranscriptTurn[]
+  analysis: CopilotAnalysis | null
+  model: string | null
+}
+
+type StopMeetingPayload = {
+  durationSeconds?: number
+  transcript?: TranscriptTurn[]
+  analysis?: CopilotAnalysis | null
+  model?: string | null
+}
+
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL)
 let mainWindow: BrowserWindow | null = null
+let dashboardWindow: BrowserWindow | null = null
 let meeting: MeetingSession | null = null
 let meetingTimer: NodeJS.Timeout | null = null
 
@@ -90,6 +109,83 @@ function createWindow() {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../dist/index.html'))
   }
+}
+
+function createDashboardWindow() {
+  if (dashboardWindow && !dashboardWindow.isDestroyed()) {
+    dashboardWindow.focus()
+    return
+  }
+
+  dashboardWindow = new BrowserWindow({
+    width: 1020,
+    height: 700,
+    minWidth: 760,
+    minHeight: 520,
+    title: 'Meetings — Sales Co-Pilot',
+    backgroundColor: '#faf8f3',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  })
+
+  dashboardWindow.on('closed', () => {
+    dashboardWindow = null
+  })
+
+  if (isDev && process.env.VITE_DEV_SERVER_URL) {
+    dashboardWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#dashboard`)
+  } else {
+    dashboardWindow.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'dashboard' })
+  }
+}
+
+// ——— Meeting history store (userData/meetings.json) ———
+
+function meetingsStorePath() {
+  return path.join(app.getPath('userData'), 'meetings.json')
+}
+
+function readMeetingRecords(): MeetingRecord[] {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(meetingsStorePath(), 'utf8'))
+    return Array.isArray(parsed) ? (parsed as MeetingRecord[]) : []
+  } catch {
+    return []
+  }
+}
+
+function writeMeetingRecords(records: MeetingRecord[]) {
+  fs.mkdirSync(path.dirname(meetingsStorePath()), { recursive: true })
+  fs.writeFileSync(meetingsStorePath(), JSON.stringify(records, null, 2))
+}
+
+function broadcastMeetingsChanged() {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send('meetings:changed')
+  }
+}
+
+function saveMeetingRecord(session: MeetingSession, payload: StopMeetingPayload) {
+  const record: MeetingRecord = {
+    id: session.id,
+    title: session.title,
+    startedAt: session.startedAt,
+    endedAt: new Date().toISOString(),
+    durationSeconds: Math.max(0, Math.round(payload.durationSeconds ?? session.elapsedSeconds)),
+    transcript: Array.isArray(payload.transcript) ? payload.transcript : [],
+    analysis: payload.analysis ?? null,
+    model: payload.model ?? null,
+  }
+
+  const records = readMeetingRecords().filter((existing) => existing.id !== record.id)
+  records.unshift(record)
+  writeMeetingRecords(records)
+  broadcastMeetingsChanged()
 }
 
 function configureDisplayCapture() {
@@ -406,14 +502,53 @@ ipcMain.handle('meeting:pause', () => {
   return meeting
 })
 
-ipcMain.handle('meeting:stop', () => {
+ipcMain.handle('meeting:stop', (_event, payload?: StopMeetingPayload) => {
   if (meeting) {
+    const wasActive = meeting.status !== 'stopped'
     meeting = { ...meeting, status: 'stopped' }
     stopTimer()
     publishMeeting()
+
+    if (wasActive) {
+      saveMeetingRecord(meeting, payload ?? {})
+    }
   }
 
   return meeting
+})
+
+ipcMain.handle('meetings:list', () => {
+  return readMeetingRecords().map(({ id, title, startedAt, endedAt, durationSeconds, transcript, analysis }) => ({
+    id,
+    title,
+    startedAt,
+    endedAt,
+    durationSeconds,
+    turnCount: transcript.length,
+    stage: analysis?.stage ?? null,
+    completedGaps: analysis?.completedGaps ?? [],
+    factCount: analysis?.facts.length ?? 0,
+  }))
+})
+
+ipcMain.handle('meetings:get', (_event, id: string) => {
+  return readMeetingRecords().find((record) => record.id === id) ?? null
+})
+
+ipcMain.handle('meetings:delete', (_event, id: string) => {
+  const records = readMeetingRecords()
+  const remaining = records.filter((record) => record.id !== id)
+  if (remaining.length !== records.length) {
+    writeMeetingRecords(remaining)
+    broadcastMeetingsChanged()
+  }
+
+  return remaining.length !== records.length
+})
+
+ipcMain.handle('dashboard:open', () => {
+  createDashboardWindow()
+  return true
 })
 
 app.whenReady().then(() => {
