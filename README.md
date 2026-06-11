@@ -30,7 +30,8 @@ app runs in test mode: pressing **Start** plays the transcript back against the 
 instead of capturing audio. Lines appear in the Transcript view as the call clock passes them, and
 the co-pilot re-analyzes the conversation as new lines land — pause, resume, stop, the stage rail,
 gaps, and facts all behave exactly as in a live call. The amber "Test" badge in the titlebar shows
-the playback speed; click it to cycle 1× → 4× → 8×.
+the playback speed; click it to cycle 1× → 4× → 8×. A scrubber under the view toggle jumps to any
+point in the call — the transcript, timer, and co-pilot follow, and playback continues from there.
 
 The file is gitignored (it usually contains real call content) — drop your own at the project
 root; delete it to return to live capture. Two formats are supported, one utterance per line:

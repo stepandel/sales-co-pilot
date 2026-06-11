@@ -169,6 +169,7 @@ function App() {
   })
   const [testLines, setTestLines] = useState<TestTranscriptLine[]>([])
   const [testSpeed, setTestSpeed] = useState<(typeof TEST_SPEEDS)[number]>(1)
+  const [scrubOffset, setScrubOffset] = useState(0)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
@@ -209,10 +210,13 @@ function App() {
 
   const elapsedSeconds = session?.elapsedSeconds ?? 0
   // In test mode the session timer drives a synthetic call clock that the
-  // playback speed multiplies; everything downstream (timer, pacing, reveals)
-  // runs on call time so they stay coherent at 4x/8x.
-  const callSeconds = testMode ? elapsedSeconds * testSpeed : elapsedSeconds
+  // playback speed multiplies and the scrubber offsets; everything downstream
+  // (timer, pacing, reveals) runs on call time so they stay coherent.
+  const callSeconds = testMode
+    ? Math.max(0, elapsedSeconds * testSpeed + scrubOffset)
+    : elapsedSeconds
   const shouldWrapSoon = stageIdx >= 5 || callSeconds > TARGET_SECONDS - 90
+  const transcriptDuration = testLines.length > 0 ? testLines[testLines.length - 1].seconds : 0
 
   // Test mode: the call clock "plays" the transcript — a line is revealed
   // once the clock passes its timestamp.
@@ -419,6 +423,23 @@ function App() {
     })
   }
 
+  // Jump the test call to an absolute position. Playback continues from there;
+  // the auto-analyze counter is rebased so the new position gets one fresh pass.
+  function scrubTo(targetSeconds: number) {
+    setScrubOffset(targetSeconds - elapsedSeconds * testSpeed)
+    lastAutoAnalyzeRef.current = {
+      count: Math.max(0, testLines.filter((line) => line.seconds <= targetSeconds).length - 1),
+      at: lastAutoAnalyzeRef.current.at,
+    }
+  }
+
+  function cycleTestSpeed() {
+    const next = TEST_SPEEDS[(TEST_SPEEDS.indexOf(testSpeed) + 1) % TEST_SPEEDS.length]
+    // Rebase the offset so changing speed never jumps the call position.
+    setScrubOffset(callSeconds - elapsedSeconds * next)
+    setTestSpeed(next)
+  }
+
   async function startMeeting() {
     if (!window.salesCopilot) {
       return
@@ -428,6 +449,7 @@ function App() {
     try {
       if (testMode) {
         lastAutoAnalyzeRef.current = { count: 0, at: 0 }
+        setScrubOffset(0)
         setCopilotAnalysis(null)
         setCopilotError('')
         setAudioAccess((current) => ({
@@ -539,11 +561,7 @@ function App() {
             type="button"
             className="test-badge"
             title="Test mode playback speed — click to change"
-            onClick={() =>
-              setTestSpeed(
-                (speed) => TEST_SPEEDS[(TEST_SPEEDS.indexOf(speed) + 1) % TEST_SPEEDS.length],
-              )
-            }
+            onClick={cycleTestSpeed}
           >
             Test {testSpeed}&times;
           </button>
@@ -611,6 +629,29 @@ function App() {
           Transcript
         </button>
       </div>
+
+      {testMode && (
+        <div className="scrub-row">
+          <input
+            type="range"
+            min={0}
+            max={transcriptDuration}
+            step={1}
+            value={Math.min(callSeconds, transcriptDuration)}
+            onChange={(event) => scrubTo(Number(event.target.value))}
+            disabled={!session}
+            aria-label="Scrub through the test call"
+            style={{
+              background: `linear-gradient(to right, var(--green) ${
+                transcriptDuration > 0
+                  ? Math.min(100, (callSeconds / transcriptDuration) * 100)
+                  : 0
+              }%, var(--line) 0)`,
+            }}
+          />
+          <span className="scrub-total">{formatElapsed(transcriptDuration)}</span>
+        </div>
+      )}
 
       {view === 'copilot' ? (
         <div className="copilot-body">
