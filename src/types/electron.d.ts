@@ -86,8 +86,11 @@ export type SalesCopilotApi = {
   analyzeCall: (transcript: TranscriptTurn[]) => Promise<AnalyzeCallResult>
   getTestTranscript: () => Promise<string | null>
   startMeeting: (title?: string) => Promise<MeetingSession>
+  saveTranscript: (turns: TranscriptTurn[]) => Promise<boolean>
   pauseMeeting: () => Promise<MeetingSession | null>
   stopMeeting: (payload?: StopMeetingPayload) => Promise<MeetingSession | null>
+  /** Resolves null when the file picker is cancelled. */
+  importTranscript: () => Promise<{ id: string } | { error: string } | null>
   listMeetings: () => Promise<MeetingSummary[]>
   getMeeting: (id: string) => Promise<MeetingRecord | null>
   deleteMeeting: (id: string) => Promise<boolean>

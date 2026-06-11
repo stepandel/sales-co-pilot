@@ -1,6 +1,7 @@
-import { app, BrowserWindow, desktopCapturer, ipcMain, screen, session, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, shell, systemPreferences } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import { parseTranscript } from '../shared/transcript'
 import {
   copilotAnalysisSchema,
   defaultOpenGaps,
@@ -21,13 +22,17 @@ type MeetingSession = {
   elapsedSeconds: number
 }
 
+// Persisted in meetings.json. Transcript turns live in their own file under
+// userData/transcripts/<id>.json; `transcript` is only present on legacy
+// records saved before that split, and `turnCount` is missing on them.
 type MeetingRecord = {
   id: string
   title: string
   startedAt: string
   endedAt: string
   durationSeconds: number
-  transcript: TranscriptTurn[]
+  turnCount?: number
+  transcript?: TranscriptTurn[]
   analysis: CopilotAnalysis | null
   model: string | null
 }
@@ -171,13 +176,16 @@ function broadcastMeetingsChanged() {
 }
 
 function saveMeetingRecord(session: MeetingSession, payload: StopMeetingPayload) {
+  const turns = Array.isArray(payload.transcript) ? payload.transcript : []
+  writeTranscriptFile(session, turns)
+
   const record: MeetingRecord = {
     id: session.id,
     title: session.title,
     startedAt: session.startedAt,
     endedAt: new Date().toISOString(),
     durationSeconds: Math.max(0, Math.round(payload.durationSeconds ?? session.elapsedSeconds)),
-    transcript: Array.isArray(payload.transcript) ? payload.transcript : [],
+    turnCount: turns.length,
     analysis: payload.analysis ?? null,
     model: payload.model ?? null,
   }
@@ -186,6 +194,45 @@ function saveMeetingRecord(session: MeetingSession, payload: StopMeetingPayload)
   records.unshift(record)
   writeMeetingRecords(records)
   broadcastMeetingsChanged()
+}
+
+// ——— Transcript store (userData/transcripts/<meetingId>.json) ———
+// One file per meeting, rewritten as turns land during the call, so a crash
+// or force-quit mid-call loses at most the line in flight.
+
+function transcriptFilePath(meetingId: string) {
+  return path.join(app.getPath('userData'), 'transcripts', `${meetingId}.json`)
+}
+
+function writeTranscriptFile(
+  session: Pick<MeetingSession, 'id' | 'title' | 'startedAt'>,
+  turns: TranscriptTurn[],
+) {
+  const filePath = transcriptFilePath(session.id)
+  fs.mkdirSync(path.dirname(filePath), { recursive: true })
+  fs.writeFileSync(
+    filePath,
+    JSON.stringify(
+      {
+        meetingId: session.id,
+        title: session.title,
+        startedAt: session.startedAt,
+        updatedAt: new Date().toISOString(),
+        turns,
+      },
+      null,
+      2,
+    ),
+  )
+}
+
+function readTranscriptTurns(meetingId: string): TranscriptTurn[] | null {
+  try {
+    const parsed = JSON.parse(fs.readFileSync(transcriptFilePath(meetingId), 'utf8'))
+    return Array.isArray(parsed?.turns) ? (parsed.turns as TranscriptTurn[]) : null
+  } catch {
+    return null
+  }
 }
 
 function configureDisplayCapture() {
@@ -505,6 +552,10 @@ ipcMain.handle('meeting:start', async (_event, title?: string) => {
     elapsedSeconds: 0,
   }
 
+  // Create the transcript file up front so the meeting is on disk from the
+  // first second, even if no turns ever land.
+  writeTranscriptFile(meeting, [])
+
   stopTimer()
   meetingTimer = setInterval(() => {
     if (!meeting || meeting.status !== 'recording') {
@@ -520,6 +571,17 @@ ipcMain.handle('meeting:start', async (_event, title?: string) => {
 
   publishMeeting()
   return meeting
+})
+
+// Live checkpoint: the renderer pushes the full turn list as lines land so
+// the transcript survives a crash; the final write happens on meeting:stop.
+ipcMain.handle('meeting:transcript', (_event, turns: TranscriptTurn[]) => {
+  if (meeting && meeting.status !== 'stopped') {
+    writeTranscriptFile(meeting, Array.isArray(turns) ? turns : [])
+    return true
+  }
+
+  return false
 })
 
 ipcMain.handle('meeting:pause', () => {
@@ -546,14 +608,79 @@ ipcMain.handle('meeting:stop', (_event, payload?: StopMeetingPayload) => {
   return meeting
 })
 
+// Import a transcript file (same formats as test mode) as a finished meeting:
+// parse it into turns, store them in the per-meeting transcript file, and add
+// a record to the meetings index.
+ipcMain.handle('meetings:import', async () => {
+  const parent = dashboardWindow ?? mainWindow
+  const dialogOptions: Electron.OpenDialogOptions = {
+    title: 'Import transcript',
+    properties: ['openFile'],
+    filters: [
+      { name: 'Transcripts', extensions: ['txt', 'md', 'text', 'log'] },
+      { name: 'All Files', extensions: ['*'] },
+    ],
+  }
+  const { canceled, filePaths } = parent
+    ? await dialog.showOpenDialog(parent, dialogOptions)
+    : await dialog.showOpenDialog(dialogOptions)
+
+  const filePath = filePaths[0]
+  if (canceled || !filePath) {
+    return null
+  }
+
+  try {
+    const parsed = parseTranscript(fs.readFileSync(filePath, 'utf8'))
+    if (parsed.lines.length === 0) {
+      return { error: 'No transcript lines could be parsed from that file.' }
+    }
+
+    const turns: TranscriptTurn[] = parsed.lines.map((line) => ({
+      speaker: line.isRep ? 'rep' : 'prospect',
+      text: line.text,
+      timestamp: line.time,
+    }))
+
+    // Best date available: the file's "Date:" header, else its modified time.
+    const headerDate = parsed.date ? new Date(parsed.date) : null
+    const startedAtDate =
+      headerDate && !Number.isNaN(headerDate.getTime()) ? headerDate : fs.statSync(filePath).mtime
+    const record: MeetingRecord = {
+      id: crypto.randomUUID(),
+      title: parsed.title ?? path.basename(filePath, path.extname(filePath)),
+      startedAt: startedAtDate.toISOString(),
+      endedAt: new Date(startedAtDate.getTime() + parsed.durationSeconds * 1000).toISOString(),
+      durationSeconds: parsed.durationSeconds,
+      turnCount: turns.length,
+      analysis: null,
+      model: null,
+    }
+
+    writeTranscriptFile(record, turns)
+
+    // Imported calls can predate existing ones, so keep the index sorted by
+    // start time instead of unshifting like a just-finished call.
+    const records = readMeetingRecords()
+    records.push(record)
+    records.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+    writeMeetingRecords(records)
+    broadcastMeetingsChanged()
+
+    return { id: record.id }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Could not import that file.' }
+  }
+})
+
 ipcMain.handle('meetings:list', () => {
-  return readMeetingRecords().map(({ id, title, startedAt, endedAt, durationSeconds, transcript, analysis }) => ({
+  return readMeetingRecords().map(({ id, title, startedAt, endedAt, durationSeconds, turnCount, transcript, analysis }) => ({
     id,
     title,
     startedAt,
     endedAt,
     durationSeconds,
-    turnCount: transcript.length,
+    turnCount: turnCount ?? transcript?.length ?? 0,
     stage: analysis?.stage ?? null,
     completedGaps: analysis?.completedGaps ?? [],
     factCount: analysis?.facts.length ?? 0,
@@ -561,7 +688,12 @@ ipcMain.handle('meetings:list', () => {
 })
 
 ipcMain.handle('meetings:get', (_event, id: string) => {
-  return readMeetingRecords().find((record) => record.id === id) ?? null
+  const record = readMeetingRecords().find((entry) => entry.id === id)
+  if (!record) {
+    return null
+  }
+
+  return { ...record, transcript: readTranscriptTurns(id) ?? record.transcript ?? [] }
 })
 
 ipcMain.handle('meetings:delete', (_event, id: string) => {
@@ -569,6 +701,7 @@ ipcMain.handle('meetings:delete', (_event, id: string) => {
   const remaining = records.filter((record) => record.id !== id)
   if (remaining.length !== records.length) {
     writeMeetingRecords(remaining)
+    fs.rmSync(transcriptFilePath(id), { force: true })
     broadcastMeetingsChanged()
   }
 

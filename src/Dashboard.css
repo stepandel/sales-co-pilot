@@ -44,6 +44,43 @@
   font-variant-numeric: tabular-nums;
 }
 
+.dash-import {
+  -webkit-app-region: no-drag;
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--ink-2);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  cursor: pointer;
+}
+
+.dash-import:hover {
+  color: var(--ink);
+  border-color: var(--ink-3);
+}
+
+.dash-import-error {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--red, #b3261e);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* When the error is shown it takes the auto margin; keep the button snug. */
+.dash-import-error + .dash-import {
+  margin-left: 0;
+}
+
 /* ——— Layout ——— */
 
 .dash-body {

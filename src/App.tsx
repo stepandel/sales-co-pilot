@@ -5,6 +5,7 @@ import { DISCOVERY_STAGES } from './discovery'
 import { CaptureSetup, type AudioAccessState } from './components/CaptureSetup'
 import { CopilotView } from './components/CopilotView'
 import { Titlebar } from './components/Titlebar'
+import { formatElapsed, parseTranscript, type ParsedTranscriptLine } from '../shared/transcript'
 
 const TARGET_SECONDS = 8 * 60
 
@@ -32,96 +33,8 @@ const transcriptForAnalysis = transcriptPreview.map((line) => ({
   timestamp: line.time,
 })) satisfies TranscriptTurn[]
 
-type TestTranscriptLine = {
-  speaker: string
-  isRep: boolean
-  seconds: number
-  time: string
-  text: string
-}
-
-type ParsedTestTranscript = {
-  title: string | null
-  lines: TestTranscriptLine[]
-}
-
-const WORDS_PER_SECOND = 2.5 // ~150 wpm conversational pace
-const MIN_UTTERANCE_SECONDS = 2
-
-// Test-mode transcript formats, one utterance per line:
-//   - timestamped:     "MM:SS Speaker: text"  (or [MM:SS] / H:MM:SS)
-//   - Granola export:  "Me: text" / "Them: text" with an optional metadata
-//     header (Meeting Title / Date / Meeting participants / Transcript:) and
-//     no timestamps — pacing is then estimated from word count.
-// "You" / "Me" / "Rep" map to the rep side. Lines that match neither shape
-// continue the previous utterance; blank lines and "#" comments are skipped.
-function parseTestTranscript(raw: string): ParsedTestTranscript {
-  const lines: TestTranscriptLine[] = []
-  let title: string | null = null
-  let clock = 0
-
-  for (const rawLine of raw.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#')) {
-      continue
-    }
-
-    const titleMatch = line.match(/^meeting title:\s*(.+)$/i)
-    if (titleMatch) {
-      title = titleMatch[1].trim()
-      continue
-    }
-
-    if (/^(date|meeting participants|attendees|transcript):/i.test(line)) {
-      continue
-    }
-
-    const timeMatch = line.match(/^\[?(\d{1,2}):(\d{2})(?::(\d{2}))?\]?\s+(.+)$/)
-    const body = timeMatch ? timeMatch[4] : line
-    const explicitSeconds = timeMatch
-      ? timeMatch[3] === undefined
-        ? Number(timeMatch[1]) * 60 + Number(timeMatch[2])
-        : Number(timeMatch[1]) * 3600 + Number(timeMatch[2]) * 60 + Number(timeMatch[3])
-      : null
-
-    const speakerMatch = body.match(/^([A-Za-z][A-Za-z0-9 .'-]{0,24}):\s*(.+)$/)
-    if (!speakerMatch) {
-      if (lines.length > 0) {
-        lines[lines.length - 1].text += ` ${body}`
-      }
-      continue
-    }
-
-    const speaker = speakerMatch[1].trim()
-    const text = speakerMatch[2].trim()
-    const seconds = explicitSeconds ?? clock
-    clock =
-      seconds +
-      Math.max(MIN_UTTERANCE_SECONDS, Math.round(text.split(/\s+/).length / WORDS_PER_SECOND))
-
-    lines.push({
-      speaker,
-      isRep: /^(you|me|rep)$/i.test(speaker),
-      seconds,
-      time: formatElapsed(seconds),
-      text,
-    })
-  }
-
-  return { title, lines: lines.sort((a, b) => a.seconds - b.seconds) }
-}
-
 const AUTO_ANALYZE_INTERVAL_MS = 12_000
 const TEST_SPEEDS = [1, 4, 8] as const
-
-function formatElapsed(seconds = 0) {
-  const minutes = Math.floor(seconds / 60)
-  const remainingSeconds = seconds % 60
-
-  return `${minutes.toString().padStart(2, '0')}:${remainingSeconds
-    .toString()
-    .padStart(2, '0')}`
-}
 
 function readableError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -207,13 +120,14 @@ function useCopilotSession() {
     systemAudio: 'idle',
     message: 'Audio access has not been requested yet.',
   })
-  const [testLines, setTestLines] = useState<TestTranscriptLine[]>([])
+  const [testLines, setTestLines] = useState<ParsedTranscriptLine[]>([])
   const [testSpeed, setTestSpeed] = useState<(typeof TEST_SPEEDS)[number]>(1)
   const [scrubOffset, setScrubOffset] = useState(0)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const lastAutoAnalyzeRef = useRef({ count: 0, at: 0 })
+  const lastSavedTurnCountRef = useRef(-1)
 
   const testMode = testLines.length > 0
   const isRecording = session?.status === 'recording'
@@ -293,7 +207,7 @@ function useCopilotSession() {
         return
       }
 
-      const parsed = parseTestTranscript(raw)
+      const parsed = parseTranscript(raw)
       setTestLines(parsed.lines)
       if (parsed.title) {
         setMeetingTitle(parsed.title)
@@ -326,6 +240,25 @@ function useCopilotSession() {
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- analyzeCall is recreated every render; the throttle guard owns when it fires
   }, [testMode, isRecording, isAnalyzing, revealedLines.length])
+
+  // Checkpoint the transcript to disk whenever the turn list changes during a
+  // call, so a crash or force-quit loses at most the line in flight. The final
+  // authoritative write happens in stopMeeting.
+  const sessionStatus = session?.status
+  useEffect(() => {
+    if (!sessionStatus || sessionStatus === 'stopped' || sessionStatus === 'idle') {
+      lastSavedTurnCountRef.current = -1
+      return
+    }
+
+    if (analysisTurns.length === lastSavedTurnCountRef.current) {
+      return
+    }
+
+    lastSavedTurnCountRef.current = analysisTurns.length
+    void window.salesCopilot?.saveTranscript(analysisTurns)
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- analysisTurns is rebuilt every render; its length is the change signal
+  }, [sessionStatus, analysisTurns.length])
 
   function stopAudioStreams() {
     microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())

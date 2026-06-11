@@ -1,4 +1,4 @@
-import { CalendarDays, Clock3, Inbox, MessageSquareText, Sparkles, Trash2 } from 'lucide-react'
+import { CalendarDays, Clock3, Inbox, MessageSquareText, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import './Dashboard.css'
 import type { MeetingRecord, MeetingSummary } from './types/electron'
@@ -57,6 +57,7 @@ function Dashboard() {
   const [loadedRecord, setLoadedRecord] = useState<MeetingRecord | null>(null)
   // Without the desktop bridge there is nothing to load, so start "loaded".
   const [isLoaded, setIsLoaded] = useState(() => !window.salesCopilot)
+  const [importError, setImportError] = useState('')
 
   useEffect(() => {
     const bridge = window.salesCopilot
@@ -112,6 +113,23 @@ function Dashboard() {
     // The meetings:changed broadcast triggers refresh; nothing else to do.
   }
 
+  // Pick a transcript file; the main process parses and stores it, and the
+  // meetings:changed broadcast brings it into the list — we just select it.
+  async function importTranscript() {
+    const result = await window.salesCopilot?.importTranscript()
+    if (!result) {
+      return
+    }
+
+    if ('error' in result) {
+      setImportError(result.error)
+      return
+    }
+
+    setImportError('')
+    setSelectedId(result.id)
+  }
+
   // List rows grouped by calendar day, newest first (the store is already sorted).
   const groups = useMemo(() => {
     const byDay: Array<{ day: string; meetings: MeetingSummary[] }> = []
@@ -140,6 +158,21 @@ function Dashboard() {
         <span className="dash-count">
           {summaries.length} {summaries.length === 1 ? 'call' : 'calls'}
         </span>
+        {importError && (
+          <span className="dash-import-error" role="alert">
+            {importError}
+          </span>
+        )}
+        {window.salesCopilot && (
+          <button
+            type="button"
+            className="dash-import"
+            title="Import a transcript file"
+            onClick={() => void importTranscript()}
+          >
+            <Upload size={12} /> Import transcript
+          </button>
+        )}
       </header>
 
       <div className="dash-body">
