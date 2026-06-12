@@ -41,6 +41,11 @@ const api = {
 
     return () => ipcRenderer.removeListener('meetings:changed', listener)
   },
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  setOpenAiKey: (key: string) => ipcRenderer.invoke('settings:set-openai-key', key),
+  clearOpenAiKey: () => ipcRenderer.invoke('settings:clear-openai-key'),
+  testOpenAiKey: () => ipcRenderer.invoke('settings:test-openai-key'),
+  openSettings: () => ipcRenderer.invoke('settings:open-window'),
   sttGetStatus: () => ipcRenderer.invoke('stt:get-status'),
   sttDownloadModel: () => ipcRenderer.invoke('stt:download'),
   sttStart: () => ipcRenderer.invoke('stt:start'),

@@ -127,7 +127,21 @@ export type MeetingSummary = {
   factCount: number
 }
 
+export type SettingsState = {
+  hasKey: boolean
+  /** Masked preview like "sk-…h3Qk" — the full key never reaches the renderer. */
+  maskedKey: string | null
+  /** True when the key comes from the OPENAI_API_KEY env var (dev .env). */
+  fromEnv: boolean
+  secureStorageAvailable: boolean
+}
+
 export type SalesCopilotApi = {
+  getSettings: () => Promise<SettingsState>
+  setOpenAiKey: (key: string) => Promise<{ state: SettingsState } | { error: string }>
+  clearOpenAiKey: () => Promise<{ state: SettingsState }>
+  testOpenAiKey: () => Promise<{ ok: true } | { error: string }>
+  openSettings: () => Promise<boolean>
   getPermissionState: () => Promise<PermissionState>
   requestMicrophonePermission: () => Promise<PermissionState>
   openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') => Promise<boolean>

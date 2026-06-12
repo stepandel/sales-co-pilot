@@ -1,0 +1,125 @@
+.settings {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-height: 100vh;
+  padding: 0 22px 16px;
+  background: var(--paper, #faf8f3);
+  color: var(--ink, #211e1a);
+  font-family: var(--font-ui, system-ui);
+}
+
+/* hiddenInset titlebar: this strip is the drag region under the traffic lights. */
+.settings-titlebar {
+  -webkit-app-region: drag;
+  margin: 0 -22px;
+  padding: 14px 22px 10px 78px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings h2 {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0 0 4px;
+  font-size: 14px;
+}
+
+.settings-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--ink-3, #8c8478);
+}
+
+.settings-current {
+  margin: 0 0 10px;
+  font-size: 12px;
+}
+
+.settings-current code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--line-soft, #eee8dd);
+}
+
+.settings-current.none {
+  color: var(--amber, #b06d00);
+}
+
+.settings-key-row {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-key-row input {
+  flex: 1;
+  padding: 8px 10px;
+  border: 1px solid var(--line, #ddd5c8);
+  border-radius: 8px;
+  background: #fff;
+  font: inherit;
+  font-size: 13px;
+}
+
+.settings button {
+  padding: 8px 14px;
+  border: 1px solid var(--line, #ddd5c8);
+  border-radius: 8px;
+  background: var(--ink, #211e1a);
+  color: #fff;
+  font: inherit;
+  font-size: 12.5px;
+  cursor: pointer;
+}
+
+.settings button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.settings-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.settings-actions button {
+  background: transparent;
+  color: var(--ink-2, #4d473f);
+}
+
+.settings-actions button.danger {
+  color: #a03325;
+}
+
+.settings-status {
+  margin: 10px 0 0;
+  font-size: 12px;
+}
+
+.settings-status.ok {
+  color: var(--green, #2c7a4b);
+}
+
+.settings-status.error {
+  color: #a03325;
+}
+
+.settings-footnote {
+  display: flex;
+  gap: 7px;
+  align-items: flex-start;
+  margin-top: auto;
+  padding-top: 12px;
+  border-top: 1px solid var(--line-soft, #eee8dd);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3, #8c8478);
+}
+
+.settings-footnote svg {
+  flex-shrink: 0;
+  margin-top: 2px;
+}

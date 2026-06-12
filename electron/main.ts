@@ -1,4 +1,4 @@
-import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, shell, systemPreferences } from 'electron'
+import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, Menu, screen, session, shell, systemPreferences } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
 import {
@@ -8,6 +8,7 @@ import {
   postMortemSystemPrompt,
 } from './postMortemPrompt'
 import { parseTranscript } from '../shared/transcript'
+import { getOpenAiApiKey, registerSettingsIpc } from './settings'
 import { registerSttIpc } from './transcription'
 import {
   type CallContext,
@@ -90,8 +91,7 @@ let meetingTimer: NodeJS.Timeout | null = null
 // panel on mount (or delivered live via replay:load when it is already open).
 let pendingReplay: ReplayPayload | null = null
 
-function loadLocalEnv() {
-  const envPath = path.join(process.cwd(), '.env')
+function readEnvFile(envPath: string) {
   if (!fs.existsSync(envPath)) {
     return
   }
@@ -116,7 +116,20 @@ function loadLocalEnv() {
   }
 }
 
-loadLocalEnv()
+function localEnvPaths() {
+  const paths = [path.join(process.cwd(), '.env')]
+  if (app.isReady()) {
+    paths.push(path.join(app.getPath('userData'), '.env'))
+  }
+
+  return paths
+}
+
+function loadLocalEnv() {
+  for (const envPath of localEnvPaths()) {
+    readEnvFile(envPath)
+  }
+}
 
 const PANEL_WIDTH = 340
 
@@ -191,6 +204,78 @@ function createDashboardWindow() {
   } else {
     dashboardWindow.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'dashboard' })
   }
+}
+
+let settingsWindow: BrowserWindow | null = null
+
+function createSettingsWindow() {
+  if (settingsWindow && !settingsWindow.isDestroyed()) {
+    settingsWindow.focus()
+    return
+  }
+
+  settingsWindow = new BrowserWindow({
+    width: 460,
+    height: 420,
+    resizable: false,
+    title: 'Settings — Sales Co-Pilot',
+    backgroundColor: '#faf8f3',
+    titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: false,
+    },
+  })
+
+  settingsWindow.on('closed', () => {
+    settingsWindow = null
+  })
+
+  if (isDev && process.env.VITE_DEV_SERVER_URL) {
+    settingsWindow.loadURL(`${process.env.VITE_DEV_SERVER_URL}#settings`)
+  } else {
+    settingsWindow.loadFile(path.join(__dirname, '../dist/index.html'), { hash: 'settings' })
+  }
+}
+
+// Standard macOS menu with a Settings… item (⌘,) in the app menu. The
+// default roles are kept so Edit (paste — needed to enter an API key),
+// View, and Window behave natively.
+function buildApplicationMenu() {
+  if (process.platform !== 'darwin') {
+    return
+  }
+
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate([
+      {
+        label: app.name,
+        submenu: [
+          { role: 'about' },
+          { type: 'separator' },
+          {
+            label: 'Settings…',
+            accelerator: 'CmdOrCtrl+,',
+            click: () => createSettingsWindow(),
+          },
+          { type: 'separator' },
+          { role: 'services' },
+          { type: 'separator' },
+          { role: 'hide' },
+          { role: 'hideOthers' },
+          { role: 'unhide' },
+          { type: 'separator' },
+          { role: 'quit' },
+        ],
+      },
+      { role: 'fileMenu' },
+      { role: 'editMenu' },
+      { role: 'viewMenu' },
+      { role: 'windowMenu' },
+    ]),
+  )
 }
 
 // ——— Meeting history store (userData/meetings.json) ———
@@ -495,9 +580,9 @@ async function requestOpenAI(
   input: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   format?: Record<string, unknown>,
 ) {
-  const apiKey = process.env.OPENAI_API_KEY
+  const apiKey = getOpenAiApiKey()
   if (!apiKey) {
-    throw new Error('Missing OPENAI_API_KEY. Add it to .env or your shell environment.')
+    throw new Error('No OpenAI API key configured. Add yours in Settings (⌘,).')
   }
 
   const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
@@ -632,6 +717,12 @@ async function runPostMortemAnalysis(transcript: TranscriptTurn[]) {
 }
 
 registerSttIpc()
+registerSettingsIpc()
+
+ipcMain.handle('settings:open-window', () => {
+  createSettingsWindow()
+  return true
+})
 
 ipcMain.handle('permissions:get-state', getPermissionState)
 
@@ -984,10 +1075,13 @@ ipcMain.handle('replay:get-pending', () => {
 })
 
 app.whenReady().then(() => {
+  loadLocalEnv()
+
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(['media', 'display-capture'].includes(permission))
   })
   configureDisplayCapture()
+  buildApplicationMenu()
 
   // The dashboard is home; the co-pilot panel opens on demand for a new
   // meeting or a replay.

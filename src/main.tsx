@@ -3,11 +3,11 @@ import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import Dashboard from './Dashboard.tsx'
+import Settings from './Settings.tsx'
 
-// Both windows load the same bundle; the dashboard window is opened
-// with a #dashboard hash (see electron/main.ts createDashboardWindow).
-const isDashboard = window.location.hash.replace(/^#\/?/, '') === 'dashboard'
+// All windows load the same bundle; the hash picks the view (see
+// electron/main.ts createDashboardWindow / createSettingsWindow).
+const route = window.location.hash.replace(/^#\/?/, '')
+const view = route === 'dashboard' ? <Dashboard /> : route === 'settings' ? <Settings /> : <App />
 
-createRoot(document.getElementById('root')!).render(
-  <StrictMode>{isDashboard ? <Dashboard /> : <App />}</StrictMode>,
-)
+createRoot(document.getElementById('root')!).render(<StrictMode>{view}</StrictMode>)

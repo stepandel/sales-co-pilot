@@ -17,6 +17,11 @@ cp .env.example .env
 
 Then set `OPENAI_API_KEY` in `.env`. The default model is `gpt-5.4-mini`.
 
+In packaged builds there is no `.env` — users bring their own key via **Settings… (⌘,)** in the
+app menu. The key is encrypted with Electron `safeStorage` (the encryption key lives in the
+macOS Keychain, scoped to the app) and only ciphertext is written to `userData/settings.json`;
+the renderer only ever sees a masked preview. A stored key takes precedence over the env var.
+
 ## Build
 
 ```bash
