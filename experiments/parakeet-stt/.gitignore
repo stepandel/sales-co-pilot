@@ -1,0 +1,6 @@
+node_modules/
+sherpa-onnx-nemo-parakeet-tdt-*/
+silero_vad.onnx
+*.tar.bz2
+*.wav
+*.aiff
