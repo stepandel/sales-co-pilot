@@ -1,7 +1,7 @@
-import { CalendarDays, Clock3, Inbox, MessageSquareText, Sparkles, Trash2, Upload } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { CalendarDays, Clock3, Inbox, MessageSquareText, Send, Sparkles, Trash2, Upload } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import './Dashboard.css'
-import type { MeetingRecord, MeetingSummary } from './types/electron'
+import type { MeetingChatMessage, MeetingRecord, MeetingSummary } from './types/electron'
 
 const DISCOVERY_GAPS = [
   'concrete instance',
@@ -61,6 +61,12 @@ function Dashboard() {
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   // Keyed by meeting id so the message only shows on the meeting it belongs to.
   const [analyzeError, setAnalyzeError] = useState<{ id: string; message: string } | null>(null)
+  // Coach chats live per meeting for the lifetime of the window; they are not persisted.
+  const [chats, setChats] = useState<Record<string, MeetingChatMessage[]>>({})
+  const [chatInput, setChatInput] = useState('')
+  const [chattingId, setChattingId] = useState<string | null>(null)
+  const [chatError, setChatError] = useState<{ id: string; message: string } | null>(null)
+  const chatLogRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     const bridge = window.salesCopilot
@@ -138,6 +144,33 @@ function Dashboard() {
     }
   }
 
+  async function sendChatMessage(id: string) {
+    const question = chatInput.trim()
+    if (!question || chattingId || !window.salesCopilot) {
+      return
+    }
+
+    const messages: MeetingChatMessage[] = [...(chats[id] ?? []), { role: 'user', content: question }]
+    setChats((current) => ({ ...current, [id]: messages }))
+    setChatInput('')
+    setChattingId(id)
+    setChatError(null)
+    try {
+      const result = await window.salesCopilot.chatAboutMeeting(id, messages)
+      if ('error' in result) {
+        setChatError({ id, message: result.error })
+        return
+      }
+
+      setChats((current) => ({
+        ...current,
+        [id]: [...messages, { role: 'assistant', content: result.reply }],
+      }))
+    } finally {
+      setChattingId(null)
+    }
+  }
+
   // Pick a transcript file; the main process parses and stores it, and the
   // meetings:changed broadcast brings it into the list — we just select it.
   async function importTranscript() {
@@ -175,6 +208,12 @@ function Dashboard() {
   // record (just-deleted or mid-switch) falls back to the empty state.
   const record = loadedRecord && loadedRecord.id === selectedId ? loadedRecord : null
   const completedGaps = new Set(record?.analysis?.completedGaps ?? [])
+  const chatMessages = record ? chats[record.id] ?? [] : []
+
+  // Keep the newest chat message (or the thinking indicator) in view.
+  useEffect(() => {
+    chatLogRef.current?.scrollTo({ top: chatLogRef.current.scrollHeight })
+  }, [chatMessages.length, chattingId])
 
   return (
     <main className="dash">
@@ -302,6 +341,41 @@ function Dashboard() {
                 <div className="dash-col">
                   <section className="dash-card">
                     <div className="dash-card-head">
+                      <h3>Post-mortem</h3>
+                      {record.postMortem && (
+                        <span className="dash-score" title="Mom Test adherence">
+                          {record.postMortem.score}/10
+                        </span>
+                      )}
+                    </div>
+                    {record.postMortem ? (
+                      <>
+                        {record.postMortem.verdict && (
+                          <p className="dash-verdict">{record.postMortem.verdict}</p>
+                        )}
+                        <h4 className="dash-pm-label">What went well</h4>
+                        <ul className="dash-pm-list good">
+                          {record.postMortem.wentWell.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                        <h4 className="dash-pm-label">What could've been better</h4>
+                        <ul className="dash-pm-list bad">
+                          {record.postMortem.couldImprove.map((item) => (
+                            <li key={item}>{item}</li>
+                          ))}
+                        </ul>
+                      </>
+                    ) : (
+                      <p className="dash-empty-note">
+                        {record.analysis ? 'Re-analyze' : 'Analyze'} this call to grade it against
+                        The Mom Test and get what-went-well / what-to-fix feedback.
+                      </p>
+                    )}
+                  </section>
+
+                  <section className="dash-card">
+                    <div className="dash-card-head">
                       <h3>Discovery gaps</h3>
                       <span>
                         {completedGaps.size}/{DISCOVERY_GAPS.length}
@@ -340,6 +414,58 @@ function Dashboard() {
                     ) : (
                       <p className="dash-empty-note">No facts were captured on this call.</p>
                     )}
+                  </section>
+
+                  <section className="dash-card dash-chat">
+                    <div className="dash-card-head">
+                      <h3>Ask the coach</h3>
+                    </div>
+                    {chatMessages.length > 0 || chattingId === record.id ? (
+                      <div className="dash-chat-log" ref={chatLogRef}>
+                        {chatMessages.map((message, index) => (
+                          <p
+                            key={`${message.role}-${index}`}
+                            className={`dash-chat-msg ${message.role}`}
+                          >
+                            {message.content}
+                          </p>
+                        ))}
+                        {chattingId === record.id && (
+                          <p className="dash-chat-msg assistant pending">Thinking…</p>
+                        )}
+                      </div>
+                    ) : (
+                      <p className="dash-empty-note">
+                        Ask follow-up questions about this call and its feedback — e.g. "why did I
+                        lose points on commitment?"
+                      </p>
+                    )}
+                    {chatError?.id === record.id && (
+                      <p className="dash-chat-error" role="alert">
+                        {chatError.message}
+                      </p>
+                    )}
+                    <form
+                      className="dash-chat-input"
+                      onSubmit={(event) => {
+                        event.preventDefault()
+                        void sendChatMessage(record.id)
+                      }}
+                    >
+                      <input
+                        value={chatInput}
+                        onChange={(event) => setChatInput(event.target.value)}
+                        placeholder="Ask about this call…"
+                        aria-label="Ask the coach about this call"
+                      />
+                      <button
+                        type="submit"
+                        title="Send"
+                        disabled={chattingId !== null || !chatInput.trim()}
+                      >
+                        <Send size={13} />
+                      </button>
+                    </form>
                   </section>
                 </div>
 

@@ -1,6 +1,12 @@
 import { app, BrowserWindow, desktopCapturer, dialog, ipcMain, screen, session, shell, systemPreferences } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
+import {
+  meetingChatSystemPrompt,
+  type PostMortem,
+  postMortemSchema,
+  postMortemSystemPrompt,
+} from './postMortemPrompt'
 import { parseTranscript } from '../shared/transcript'
 import {
   copilotAnalysisSchema,
@@ -34,7 +40,13 @@ type MeetingRecord = {
   turnCount?: number
   transcript?: TranscriptTurn[]
   analysis: CopilotAnalysis | null
+  postMortem?: PostMortem | null
   model: string | null
+}
+
+type MeetingChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
 }
 
 type StopMeetingPayload = {
@@ -434,7 +446,10 @@ function logJson(label: string, value: unknown) {
   console.info(label, JSON.stringify(value, null, 2))
 }
 
-async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
+async function requestOpenAI(
+  input: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
+  format?: Record<string, unknown>,
+) {
   const apiKey = process.env.OPENAI_API_KEY
   if (!apiKey) {
     throw new Error('Missing OPENAI_API_KEY. Add it to .env or your shell environment.')
@@ -442,35 +457,9 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
   const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
-  const requestBody = {
-    model,
-    store: false,
-    input: [
-      {
-        role: 'system',
-        content: salesCopilotSystemPrompt,
-      },
-      {
-        role: 'user',
-        content: JSON.stringify({
-          currentStage: 'Just here to learn',
-          facts: [],
-          gaps: [...defaultOpenGaps],
-          mossContext: [],
-          // Full transcript, never truncated: the turns array only grows at
-          // the tail, so provider prompt caching keeps repeat analyses cheap.
-          transcript,
-        }),
-      },
-    ],
-    text: {
-      format: {
-        type: 'json_schema',
-        name: 'sales_copilot_analysis',
-        strict: true,
-        schema: copilotAnalysisSchema,
-      },
-    },
+  const requestBody: Record<string, unknown> = { model, store: false, input }
+  if (format) {
+    requestBody.text = { format }
   }
 
   logJson('openai_request_body', requestBody)
@@ -495,12 +484,84 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
     throw new Error(error)
   }
 
-  const rawContent = extractResponseText(body)
-  const parsedAnalysis = parseCopilotAnalysis(parseJsonModelContent(rawContent))
+  return { model, text: extractResponseText(body) }
+}
+
+async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
+  const { model, text } = await requestOpenAI(
+    [
+      {
+        role: 'system',
+        content: salesCopilotSystemPrompt,
+      },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          currentStage: 'Just here to learn',
+          facts: [],
+          gaps: [...defaultOpenGaps],
+          mossContext: [],
+          // Full transcript, never truncated: the turns array only grows at
+          // the tail, so provider prompt caching keeps repeat analyses cheap.
+          transcript,
+        }),
+      },
+    ],
+    {
+      type: 'json_schema',
+      name: 'sales_copilot_analysis',
+      strict: true,
+      schema: copilotAnalysisSchema,
+    },
+  )
 
   return {
     model,
-    analysis: parsedAnalysis,
+    analysis: parseCopilotAnalysis(parseJsonModelContent(text)),
+  }
+}
+
+function parsePostMortemBullets(value: unknown) {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === 'string' && item.trim().length > 0)
+        .map((item) => item.trim())
+        .slice(0, 5)
+    : []
+}
+
+function parsePostMortem(value: unknown): PostMortem {
+  if (!value || typeof value !== 'object') {
+    throw new Error('Post-mortem response was not an object.')
+  }
+
+  const record = value as Record<string, unknown>
+  return {
+    score:
+      typeof record.score === 'number' ? Math.min(10, Math.max(1, Math.round(record.score))) : 5,
+    verdict: typeof record.verdict === 'string' ? record.verdict.trim() : '',
+    wentWell: parsePostMortemBullets(record.wentWell),
+    couldImprove: parsePostMortemBullets(record.couldImprove),
+  }
+}
+
+async function runPostMortemAnalysis(transcript: TranscriptTurn[]) {
+  const { model, text } = await requestOpenAI(
+    [
+      { role: 'system', content: postMortemSystemPrompt },
+      { role: 'user', content: JSON.stringify({ transcript }) },
+    ],
+    {
+      type: 'json_schema',
+      name: 'sales_call_post_mortem',
+      strict: true,
+      schema: postMortemSchema,
+    },
+  )
+
+  return {
+    model,
+    postMortem: parsePostMortem(parseJsonModelContent(text)),
   }
 }
 
@@ -694,11 +755,16 @@ ipcMain.handle('meetings:get', (_event, id: string) => {
     return null
   }
 
-  return { ...record, transcript: readTranscriptTurns(id) ?? record.transcript ?? [] }
+  return {
+    ...record,
+    transcript: readTranscriptTurns(id) ?? record.transcript ?? [],
+    postMortem: record.postMortem ?? null,
+  }
 })
 
-// Run the co-pilot over a stored meeting's transcript (imported calls, or
-// re-analysis of any finished one) and persist the result on its record.
+// Run the co-pilot and the Mom Test post-mortem over a stored meeting's
+// transcript (imported calls, or re-analysis of any finished one) and
+// persist both results on its record.
 ipcMain.handle('meetings:analyze', async (_event, id: string) => {
   const records = readMeetingRecords()
   const record = records.find((entry) => entry.id === id)
@@ -712,14 +778,59 @@ ipcMain.handle('meetings:analyze', async (_event, id: string) => {
   }
 
   try {
-    const { model, analysis } = await runCopilotAnalysis(turns)
-    record.analysis = analysis
-    record.model = model
+    const [copilot, post] = await Promise.all([
+      runCopilotAnalysis(turns),
+      runPostMortemAnalysis(turns),
+    ])
+    record.analysis = copilot.analysis
+    record.postMortem = post.postMortem
+    record.model = copilot.model
     writeMeetingRecords(records)
     broadcastMeetingsChanged()
     return { record: { ...record, transcript: turns } }
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Analysis failed.' }
+  }
+})
+
+// Follow-up coaching chat about a finished call. Stateless: the renderer owns
+// the chat history and sends it whole; we prepend the meeting context.
+ipcMain.handle('meetings:chat', async (_event, id: string, messages: MeetingChatMessage[]) => {
+  const record = readMeetingRecords().find((entry) => entry.id === id)
+  if (!record) {
+    return { error: 'Meeting not found.' }
+  }
+
+  const history = (Array.isArray(messages) ? messages : [])
+    .filter(
+      (message): message is MeetingChatMessage =>
+        Boolean(message) &&
+        (message.role === 'user' || message.role === 'assistant') &&
+        typeof message.content === 'string' &&
+        message.content.trim().length > 0,
+    )
+    .slice(-20)
+  if (history.length === 0) {
+    return { error: 'Ask a question about the call.' }
+  }
+
+  try {
+    const turns = readTranscriptTurns(id) ?? record.transcript ?? []
+    const { text } = await requestOpenAI([
+      { role: 'system', content: meetingChatSystemPrompt },
+      {
+        role: 'user',
+        content: JSON.stringify({
+          transcript: turns,
+          analysis: record.analysis,
+          postMortem: record.postMortem ?? null,
+        }),
+      },
+      ...history,
+    ])
+    return { reply: text.trim() }
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Chat request failed.' }
   }
 })
 

@@ -15,6 +15,8 @@ const api = {
   listMeetings: () => ipcRenderer.invoke('meetings:list'),
   getMeeting: (id: string) => ipcRenderer.invoke('meetings:get', id),
   analyzeMeeting: (id: string) => ipcRenderer.invoke('meetings:analyze', id),
+  chatAboutMeeting: (id: string, messages: unknown[]) =>
+    ipcRenderer.invoke('meetings:chat', id, messages),
   deleteMeeting: (id: string) => ipcRenderer.invoke('meetings:delete', id),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
   onMeetingUpdated: (callback: (session: unknown) => void) => {

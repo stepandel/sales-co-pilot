@@ -56,6 +56,19 @@ export type StopMeetingPayload = {
   model?: string | null
 }
 
+export type PostMortem = {
+  /** 1-10 adherence to The Mom Test. */
+  score: number
+  verdict: string
+  wentWell: string[]
+  couldImprove: string[]
+}
+
+export type MeetingChatMessage = {
+  role: 'user' | 'assistant'
+  content: string
+}
+
 export type MeetingRecord = {
   id: string
   title: string
@@ -64,6 +77,7 @@ export type MeetingRecord = {
   durationSeconds: number
   transcript: TranscriptTurn[]
   analysis: CopilotAnalysis | null
+  postMortem: PostMortem | null
   model: string | null
 }
 
@@ -94,6 +108,10 @@ export type SalesCopilotApi = {
   listMeetings: () => Promise<MeetingSummary[]>
   getMeeting: (id: string) => Promise<MeetingRecord | null>
   analyzeMeeting: (id: string) => Promise<{ record: MeetingRecord } | { error: string }>
+  chatAboutMeeting: (
+    id: string,
+    messages: MeetingChatMessage[],
+  ) => Promise<{ reply: string } | { error: string }>
   deleteMeeting: (id: string) => Promise<boolean>
   openDashboard: () => Promise<boolean>
   onMeetingUpdated: (callback: (session: MeetingSession | null) => void) => () => void
