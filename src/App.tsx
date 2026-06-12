@@ -466,7 +466,9 @@ function useCopilotSession() {
     dispatchAnalysis({ type: 'start' })
     const startedAt = performance.now()
     try {
-      const result = await window.salesCopilot.analyzeCall(analysisTurns)
+      // Feed the previous analysis back as working state — the model holds
+      // stage/questions steady across passes instead of re-deriving them.
+      const result = await window.salesCopilot.analyzeCall(analysisTurns, copilotAnalysis)
       dispatchAnalysis({
         type: 'succeeded',
         model: result.model,

@@ -514,7 +514,11 @@ async function requestOpenAI(
   return { model, text: extractResponseText(body) }
 }
 
-async function runCopilotAnalysis(transcript: TranscriptTurn[], requestedModel: string) {
+async function runCopilotAnalysis(
+  transcript: TranscriptTurn[],
+  requestedModel: string,
+  previousAnalysis: CopilotAnalysis | null = null,
+) {
   const { model, text } = await requestOpenAI(
     requestedModel,
     [
@@ -525,13 +529,13 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[], requestedModel: 
       {
         role: 'user',
         content: JSON.stringify({
-          currentStage: 'Just here to learn',
-          facts: [],
-          gaps: [...defaultOpenGaps],
-          mossContext: [],
           // Full transcript, never truncated: the turns array only grows at
           // the tail, so provider prompt caching keeps repeat analyses cheap.
+          // It must stay first so previousAnalysis (which changes every pass)
+          // doesn't invalidate the cached prefix.
           transcript,
+          mossContext: [],
+          previousAnalysis,
         }),
       },
     ],
@@ -619,9 +623,16 @@ ipcMain.handle('permissions:open-settings', async (_event, pane: 'microphone' | 
   return true
 })
 
-ipcMain.handle('ai:analyze-call', async (_event, transcript: TranscriptTurn[]) => {
-  return runCopilotAnalysis(Array.isArray(transcript) ? transcript : [], liveModel())
-})
+ipcMain.handle(
+  'ai:analyze-call',
+  async (_event, transcript: TranscriptTurn[], previous?: CopilotAnalysis | null) => {
+    return runCopilotAnalysis(
+      Array.isArray(transcript) ? transcript : [],
+      liveModel(),
+      previous && typeof previous === 'object' ? previous : null,
+    )
+  },
+)
 
 ipcMain.handle('meeting:start', async (_event, title?: string, options?: { replay?: boolean }) => {
   meeting = {

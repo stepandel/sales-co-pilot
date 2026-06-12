@@ -108,7 +108,11 @@ export type SalesCopilotApi = {
   getPermissionState: () => Promise<PermissionState>
   requestMicrophonePermission: () => Promise<PermissionState>
   openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') => Promise<boolean>
-  analyzeCall: (transcript: TranscriptTurn[]) => Promise<AnalyzeCallResult>
+  analyzeCall: (
+    transcript: TranscriptTurn[],
+    /** Last analysis fed back as working state so consecutive passes stay stable. */
+    previous?: CopilotAnalysis | null,
+  ) => Promise<AnalyzeCallResult>
   startMeeting: (title?: string, options?: { replay?: boolean }) => Promise<MeetingSession>
   saveTranscript: (turns: TranscriptTurn[]) => Promise<boolean>
   pauseMeeting: () => Promise<MeetingSession | null>
