@@ -33,7 +33,7 @@ const transcriptForAnalysis = transcriptPreview.map((line) => ({
   timestamp: line.time,
 })) satisfies TranscriptTurn[]
 
-const AUTO_ANALYZE_INTERVAL_MS = 12_000
+const AUTO_ANALYZE_INTERVAL_MS = 5_000
 const TEST_SPEEDS = [1, 4, 8] as const
 
 function readableError(error: unknown) {
