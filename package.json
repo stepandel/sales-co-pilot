@@ -1,7 +1,7 @@
 {
   "name": "sales-co-pilot",
   "private": true,
-  "version": "0.0.0",
+  "version": "0.1.0",
   "main": "dist-electron/main.cjs",
   "type": "module",
   "scripts": {
@@ -46,6 +46,7 @@
     ],
     "mac": {
       "category": "public.app-category.business",
+      "icon": "build/icon.icns",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Sales Co-Pilot needs microphone access to transcribe your side of sales calls.",
         "NSAudioCaptureUsageDescription": "Sales Co-Pilot needs system audio access to transcribe remote participants in calls.",
