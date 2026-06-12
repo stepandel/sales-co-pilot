@@ -26,7 +26,10 @@ export type MeetingSession = {
 }
 
 export type TranscriptTurn = {
+  /** Which side of the call is talking; the analysis logic only needs this. */
   speaker: 'rep' | 'prospect'
+  /** The speaker's original label from the transcript, e.g. "Me", "Jordan". */
+  name?: string
   text: string
   timestamp?: string
 }

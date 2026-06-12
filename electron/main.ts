@@ -714,6 +714,7 @@ ipcMain.handle('meetings:import', async () => {
 
     const turns: TranscriptTurn[] = parsed.lines.map((line) => ({
       speaker: line.isRep ? 'rep' : 'prospect',
+      name: line.speaker,
       text: line.text,
       timestamp: line.time,
     }))

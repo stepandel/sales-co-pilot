@@ -479,7 +479,7 @@ function Dashboard() {
                         <span className="dash-t-time">{turn.timestamp ?? ''}</span>
                         <div>
                           <strong className={turn.speaker === 'rep' ? 'you' : ''}>
-                            {turn.speaker === 'rep' ? 'You' : 'Prospect'}
+                            {turn.speaker === 'rep' ? 'You' : turn.name ?? 'Prospect'}
                           </strong>
                           <p>{turn.text}</p>
                         </div>

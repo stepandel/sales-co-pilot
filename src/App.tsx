@@ -29,6 +29,7 @@ const transcriptPreview = [
 
 const transcriptForAnalysis = transcriptPreview.map((line) => ({
   speaker: line.speaker === 'You' ? 'rep' : 'prospect',
+  name: line.speaker,
   text: line.text,
   timestamp: line.time,
 })) satisfies TranscriptTurn[]
@@ -198,6 +199,7 @@ function useCopilotSession() {
   const analysisTurns: TranscriptTurn[] = testMode
     ? revealedLines.map((line) => ({
         speaker: line.isRep ? 'rep' : 'prospect',
+        name: line.speaker,
         text: line.text,
         timestamp: line.time,
       }))
