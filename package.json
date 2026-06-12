@@ -15,7 +15,8 @@
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
     "react-dom": "^19.2.6",
-    "sherpa-onnx-node": "^1.13.2"
+    "sherpa-onnx-node": "^1.13.2",
+    "sherpa-onnx-darwin-arm64": "^1.13.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
