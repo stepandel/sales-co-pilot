@@ -446,7 +446,20 @@ function logJson(label: string, value: unknown) {
   console.info(label, JSON.stringify(value, null, 2))
 }
 
+// Live in-call analysis runs every few seconds, so it stays on a mini model
+// to keep latency low. Post-call review — Dashboard analysis, the post-mortem,
+// and the coach chat — is one-shot and quality-sensitive, so it gets the
+// stronger model.
+function liveModel() {
+  return process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
+}
+
+function reviewModel() {
+  return process.env.OPENAI_REVIEW_MODEL ?? 'gpt-5.5'
+}
+
 async function requestOpenAI(
+  model: string,
   input: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
   format?: Record<string, unknown>,
 ) {
@@ -455,7 +468,6 @@ async function requestOpenAI(
     throw new Error('Missing OPENAI_API_KEY. Add it to .env or your shell environment.')
   }
 
-  const model = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
   const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
   const requestBody: Record<string, unknown> = { model, store: false, input }
   if (format) {
@@ -487,8 +499,9 @@ async function requestOpenAI(
   return { model, text: extractResponseText(body) }
 }
 
-async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
+async function runCopilotAnalysis(transcript: TranscriptTurn[], requestedModel: string) {
   const { model, text } = await requestOpenAI(
+    requestedModel,
     [
       {
         role: 'system',
@@ -547,6 +560,7 @@ function parsePostMortem(value: unknown): PostMortem {
 
 async function runPostMortemAnalysis(transcript: TranscriptTurn[]) {
   const { model, text } = await requestOpenAI(
+    reviewModel(),
     [
       { role: 'system', content: postMortemSystemPrompt },
       { role: 'user', content: JSON.stringify({ transcript }) },
@@ -591,7 +605,7 @@ ipcMain.handle('permissions:open-settings', async (_event, pane: 'microphone' | 
 })
 
 ipcMain.handle('ai:analyze-call', async (_event, transcript: TranscriptTurn[]) => {
-  return runCopilotAnalysis(Array.isArray(transcript) ? transcript : [])
+  return runCopilotAnalysis(Array.isArray(transcript) ? transcript : [], liveModel())
 })
 
 // Test mode: when test-transcript.txt exists at the project root, the renderer
@@ -779,7 +793,7 @@ ipcMain.handle('meetings:analyze', async (_event, id: string) => {
 
   try {
     const [copilot, post] = await Promise.all([
-      runCopilotAnalysis(turns),
+      runCopilotAnalysis(turns, reviewModel()),
       runPostMortemAnalysis(turns),
     ])
     record.analysis = copilot.analysis
@@ -816,7 +830,7 @@ ipcMain.handle('meetings:chat', async (_event, id: string, messages: MeetingChat
 
   try {
     const turns = readTranscriptTurns(id) ?? record.transcript ?? []
-    const { text } = await requestOpenAI([
+    const { text } = await requestOpenAI(reviewModel(), [
       { role: 'system', content: meetingChatSystemPrompt },
       {
         role: 'user',
