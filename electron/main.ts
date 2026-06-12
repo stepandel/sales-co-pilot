@@ -442,7 +442,6 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
 
   const model = process.env.OPENAI_MODEL ?? 'gpt-5.4-mini'
   const baseUrl = process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1'
-  const transcriptForPrompt = transcript.slice(-40)
   const requestBody = {
     model,
     store: false,
@@ -458,7 +457,9 @@ async function runCopilotAnalysis(transcript: TranscriptTurn[]) {
           facts: [],
           gaps: [...defaultOpenGaps],
           mossContext: [],
-          transcript: transcriptForPrompt,
+          // Full transcript, never truncated: the turns array only grows at
+          // the tail, so provider prompt caching keeps repeat analyses cheap.
+          transcript,
         }),
       },
     ],
