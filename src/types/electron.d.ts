@@ -115,6 +115,7 @@ export type SalesCopilotApi = {
   stopMeeting: (payload?: StopMeetingPayload) => Promise<MeetingSession | null>
   /** Resolves null when the file picker is cancelled. */
   importTranscript: () => Promise<{ id: string } | { error: string } | null>
+  importTranscriptText: (raw: string) => Promise<{ id: string } | { error: string }>
   listMeetings: () => Promise<MeetingSummary[]>
   getMeeting: (id: string) => Promise<MeetingRecord | null>
   analyzeMeeting: (id: string) => Promise<{ record: MeetingRecord } | { error: string }>

@@ -86,6 +86,87 @@
   opacity: 0.88;
 }
 
+.dash-new:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+/* ——— Import modal ——— */
+
+.dash-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(30, 26, 18, 0.35);
+}
+
+.dash-modal {
+  width: min(560px, calc(100vw - 48px));
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 13px;
+  padding: 18px 20px;
+  box-shadow: 0 18px 48px rgba(30, 26, 18, 0.22);
+}
+
+.dash-modal h2 {
+  margin: 0 0 6px;
+  font-family: var(--font-serif);
+  font-weight: 500;
+  font-size: 18px;
+}
+
+.dash-modal-hint {
+  margin: 0 0 10px;
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink-3);
+}
+
+.dash-modal textarea {
+  width: 100%;
+  box-sizing: border-box;
+  height: 200px;
+  resize: vertical;
+  padding: 9px 11px;
+  font-family: var(--font-ui);
+  font-size: 11.5px;
+  line-height: 1.5;
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  margin-bottom: 10px;
+}
+
+.dash-modal textarea:focus {
+  outline: none;
+  border-color: var(--ink-3);
+}
+
+.dash-modal .dash-import-error {
+  display: block;
+  margin: -4px 0 8px;
+}
+
+.dash-modal-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* The titlebar variant pushes itself right with an auto margin; not here. */
+.dash-modal .dash-import {
+  margin-left: 0;
+}
+
+.dash-modal-spacer {
+  flex: 1;
+}
+
 .dash-import-error {
   margin-left: auto;
   font-size: 11px;

@@ -12,6 +12,7 @@ const api = {
   pauseMeeting: () => ipcRenderer.invoke('meeting:pause'),
   stopMeeting: (payload?: unknown) => ipcRenderer.invoke('meeting:stop', payload),
   importTranscript: () => ipcRenderer.invoke('meetings:import'),
+  importTranscriptText: (raw: string) => ipcRenderer.invoke('meetings:import-text', raw),
   listMeetings: () => ipcRenderer.invoke('meetings:list'),
   getMeeting: (id: string) => ipcRenderer.invoke('meetings:get', id),
   analyzeMeeting: (id: string) => ipcRenderer.invoke('meetings:analyze', id),

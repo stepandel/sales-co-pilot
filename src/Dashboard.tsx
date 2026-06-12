@@ -58,6 +58,8 @@ function Dashboard() {
   // Without the desktop bridge there is nothing to load, so start "loaded".
   const [isLoaded, setIsLoaded] = useState(() => !window.salesCopilot)
   const [importError, setImportError] = useState('')
+  const [importOpen, setImportOpen] = useState(false)
+  const [pasteText, setPasteText] = useState('')
   const [analyzingId, setAnalyzingId] = useState<string | null>(null)
   // Keyed by meeting id so the message only shows on the meeting it belongs to.
   const [analyzeError, setAnalyzeError] = useState<{ id: string; message: string } | null>(null)
@@ -171,10 +173,9 @@ function Dashboard() {
     }
   }
 
-  // Pick a transcript file; the main process parses and stores it, and the
-  // meetings:changed broadcast brings it into the list — we just select it.
-  async function importTranscript() {
-    const result = await window.salesCopilot?.importTranscript()
+  // Both import paths: the main process parses and stores the transcript, and
+  // the meetings:changed broadcast brings it into the list — we just select it.
+  function applyImportResult(result: { id: string } | { error: string } | null | undefined) {
     if (!result) {
       return
     }
@@ -185,7 +186,21 @@ function Dashboard() {
     }
 
     setImportError('')
+    setImportOpen(false)
+    setPasteText('')
     setSelectedId(result.id)
+  }
+
+  async function importTranscriptFile() {
+    applyImportResult(await window.salesCopilot?.importTranscript())
+  }
+
+  async function importPastedTranscript() {
+    if (!pasteText.trim()) {
+      return
+    }
+
+    applyImportResult(await window.salesCopilot?.importTranscriptText(pasteText))
   }
 
   // List rows grouped by calendar day, newest first (the store is already sorted).
@@ -222,7 +237,7 @@ function Dashboard() {
         <span className="dash-count">
           {summaries.length} {summaries.length === 1 ? 'call' : 'calls'}
         </span>
-        {importError && (
+        {importError && !importOpen && (
           <span className="dash-import-error" role="alert">
             {importError}
           </span>
@@ -232,8 +247,11 @@ function Dashboard() {
             <button
               type="button"
               className="dash-import"
-              title="Import a transcript file"
-              onClick={() => void importTranscript()}
+              title="Import a transcript by pasting it or from a file"
+              onClick={() => {
+                setImportError('')
+                setImportOpen(true)
+              }}
             >
               <Upload size={12} /> Import transcript
             </button>
@@ -248,6 +266,60 @@ function Dashboard() {
           </>
         )}
       </header>
+
+      {importOpen && (
+        <div
+          className="dash-modal-backdrop"
+          onClick={() => setImportOpen(false)}
+          onKeyDown={(event) => {
+            if (event.key === 'Escape') {
+              setImportOpen(false)
+            }
+          }}
+        >
+          <div
+            className="dash-modal"
+            role="dialog"
+            aria-label="Import transcript"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <h2>Import transcript</h2>
+            <p className="dash-modal-hint">
+              Paste a transcript below — timestamped "MM:SS Speaker: text" lines or a
+              Granola-style "Me:/Them:" export, with an optional "Meeting Title:" / "Date:"
+              header.
+            </p>
+            <textarea
+              value={pasteText}
+              onChange={(event) => setPasteText(event.target.value)}
+              placeholder={'Meeting Title: Acme discovery call\nMe: Thanks for making time today.\nThem: Of course. We have been struggling with…'}
+              autoFocus
+            />
+            {importError && (
+              <p className="dash-import-error" role="alert">
+                {importError}
+              </p>
+            )}
+            <div className="dash-modal-actions">
+              <button type="button" className="dash-import" onClick={() => void importTranscriptFile()}>
+                <Upload size={12} /> From file…
+              </button>
+              <span className="dash-modal-spacer" />
+              <button type="button" className="dash-import" onClick={() => setImportOpen(false)}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="dash-new"
+                disabled={!pasteText.trim()}
+                onClick={() => void importPastedTranscript()}
+              >
+                Import
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="dash-body">
         <aside className="dash-list">

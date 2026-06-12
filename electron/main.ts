@@ -715,48 +715,71 @@ ipcMain.handle('meetings:import', async () => {
   }
 
   try {
-    const parsed = parseTranscript(fs.readFileSync(filePath, 'utf8'))
-    if (parsed.lines.length === 0) {
-      return { error: 'No transcript lines could be parsed from that file.' }
-    }
-
-    const turns: TranscriptTurn[] = parsed.lines.map((line) => ({
-      speaker: line.isRep ? 'rep' : 'prospect',
-      name: line.speaker,
-      text: line.text,
-      timestamp: line.time,
-    }))
-
-    // Best date available: the file's "Date:" header, else its modified time.
-    const headerDate = parsed.date ? new Date(parsed.date) : null
-    const startedAtDate =
-      headerDate && !Number.isNaN(headerDate.getTime()) ? headerDate : fs.statSync(filePath).mtime
-    const record: MeetingRecord = {
-      id: crypto.randomUUID(),
-      title: parsed.title ?? path.basename(filePath, path.extname(filePath)),
-      startedAt: startedAtDate.toISOString(),
-      endedAt: new Date(startedAtDate.getTime() + parsed.durationSeconds * 1000).toISOString(),
-      durationSeconds: parsed.durationSeconds,
-      turnCount: turns.length,
-      analysis: null,
-      model: null,
-    }
-
-    writeTranscriptFile(record, turns)
-
-    // Imported calls can predate existing ones, so keep the index sorted by
-    // start time instead of unshifting like a just-finished call.
-    const records = readMeetingRecords()
-    records.push(record)
-    records.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
-    writeMeetingRecords(records)
-    broadcastMeetingsChanged()
-
-    return { id: record.id }
+    return importTranscriptText(fs.readFileSync(filePath, 'utf8'), {
+      title: path.basename(filePath, path.extname(filePath)),
+      // Best date available when there is no "Date:" header: the file's mtime.
+      startedAt: fs.statSync(filePath).mtime,
+    })
   } catch (error) {
     return { error: error instanceof Error ? error.message : 'Could not import that file.' }
   }
 })
+
+// Import a transcript pasted as raw text. Same parsing as the file path, but
+// the fallbacks come from "now" instead of file metadata.
+ipcMain.handle('meetings:import-text', (_event, raw: string) => {
+  if (typeof raw !== 'string' || !raw.trim()) {
+    return { error: 'Paste a transcript first.' }
+  }
+
+  try {
+    return importTranscriptText(raw, { title: 'Pasted transcript', startedAt: new Date() })
+  } catch (error) {
+    return { error: error instanceof Error ? error.message : 'Could not import that transcript.' }
+  }
+})
+
+// Shared tail of both import paths: parse the raw text, store the transcript
+// file and the index record, and surface the new meeting everywhere.
+function importTranscriptText(raw: string, fallback: { title: string; startedAt: Date }) {
+  const parsed = parseTranscript(raw)
+  if (parsed.lines.length === 0) {
+    return { error: 'No transcript lines could be parsed. Expected "MM:SS Speaker: text" lines or a "Me:/Them:" export.' }
+  }
+
+  const turns: TranscriptTurn[] = parsed.lines.map((line) => ({
+    speaker: line.isRep ? 'rep' : 'prospect',
+    name: line.speaker,
+    text: line.text,
+    timestamp: line.time,
+  }))
+
+  const headerDate = parsed.date ? new Date(parsed.date) : null
+  const startedAtDate =
+    headerDate && !Number.isNaN(headerDate.getTime()) ? headerDate : fallback.startedAt
+  const record: MeetingRecord = {
+    id: crypto.randomUUID(),
+    title: parsed.title ?? fallback.title,
+    startedAt: startedAtDate.toISOString(),
+    endedAt: new Date(startedAtDate.getTime() + parsed.durationSeconds * 1000).toISOString(),
+    durationSeconds: parsed.durationSeconds,
+    turnCount: turns.length,
+    analysis: null,
+    model: null,
+  }
+
+  writeTranscriptFile(record, turns)
+
+  // Imported calls can predate existing ones, so keep the index sorted by
+  // start time instead of unshifting like a just-finished call.
+  const records = readMeetingRecords()
+  records.push(record)
+  records.sort((a, b) => b.startedAt.localeCompare(a.startedAt))
+  writeMeetingRecords(records)
+  broadcastMeetingsChanged()
+
+  return { id: record.id }
+}
 
 ipcMain.handle('meetings:list', () => {
   return readMeetingRecords().map(({ id, title, startedAt, endedAt, durationSeconds, turnCount, transcript, analysis }) => ({
