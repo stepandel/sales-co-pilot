@@ -42,6 +42,12 @@ export type TranscriptTurn = {
   timestamp?: string
 }
 
+/** The rep's pre-call prep, injected into every analysis pass. */
+export type CallContext = {
+  prospectName: string | null
+  notes: string | null
+}
+
 export type CopilotAnalysis = {
   stage: string
   nextQuestions: Array<{
@@ -112,6 +118,8 @@ export type SalesCopilotApi = {
     transcript: TranscriptTurn[],
     /** Last analysis fed back as working state so consecutive passes stay stable. */
     previous?: CopilotAnalysis | null,
+    /** Pre-call prep (prospect name + notes) to ground suggestions. */
+    callContext?: CallContext | null,
   ) => Promise<AnalyzeCallResult>
   startMeeting: (title?: string, options?: { replay?: boolean }) => Promise<MeetingSession>
   saveTranscript: (turns: TranscriptTurn[]) => Promise<boolean>

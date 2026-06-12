@@ -9,6 +9,7 @@ import {
 } from './postMortemPrompt'
 import { parseTranscript } from '../shared/transcript'
 import {
+  type CallContext,
   copilotAnalysisSchema,
   defaultOpenGaps,
   type CopilotAnalysis,
@@ -514,10 +515,26 @@ async function requestOpenAI(
   return { model, text: extractResponseText(body) }
 }
 
+function sanitizeCallContext(value: unknown): CallContext | null {
+  if (!value || typeof value !== 'object') {
+    return null
+  }
+
+  const record = value as Record<string, unknown>
+  const prospectName = typeof record.prospectName === 'string' ? record.prospectName.trim() : ''
+  const notes = typeof record.notes === 'string' ? record.notes.trim() : ''
+  if (!prospectName && !notes) {
+    return null
+  }
+
+  return { prospectName: prospectName || null, notes: notes || null }
+}
+
 async function runCopilotAnalysis(
   transcript: TranscriptTurn[],
   requestedModel: string,
   previousAnalysis: CopilotAnalysis | null = null,
+  callContext: CallContext | null = null,
 ) {
   const { model, text } = await requestOpenAI(
     requestedModel,
@@ -529,12 +546,12 @@ async function runCopilotAnalysis(
       {
         role: 'user',
         content: JSON.stringify({
-          // Full transcript, never truncated: the turns array only grows at
-          // the tail, so provider prompt caching keeps repeat analyses cheap.
-          // It must stay first so previousAnalysis (which changes every pass)
-          // doesn't invalidate the cached prefix.
+          // Payload order is prompt-cache layout: callContext is fixed for the
+          // call, the transcript only grows at the tail (and is never
+          // truncated), so the prefix stays cacheable across passes;
+          // previousAnalysis changes every pass and must come last.
+          callContext,
           transcript,
-          mossContext: [],
           previousAnalysis,
         }),
       },
@@ -625,11 +642,17 @@ ipcMain.handle('permissions:open-settings', async (_event, pane: 'microphone' | 
 
 ipcMain.handle(
   'ai:analyze-call',
-  async (_event, transcript: TranscriptTurn[], previous?: CopilotAnalysis | null) => {
+  async (
+    _event,
+    transcript: TranscriptTurn[],
+    previous?: CopilotAnalysis | null,
+    callContext?: CallContext | null,
+  ) => {
     return runCopilotAnalysis(
       Array.isArray(transcript) ? transcript : [],
       liveModel(),
       previous && typeof previous === 'object' ? previous : null,
+      sanitizeCallContext(callContext),
     )
   },
 )

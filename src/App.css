@@ -224,6 +224,40 @@
   color: #c0baae;
 }
 
+/* ——— Pre-call prep (prospect name + context for the co-pilot) ——— */
+
+.prep-fields {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px 13px 0;
+}
+
+.prep-fields input,
+.prep-fields textarea {
+  border: 1px solid var(--line);
+  background: var(--paper);
+  font-family: var(--font-ui);
+  font-size: 12px;
+  color: var(--ink);
+  padding: 6px 8px;
+  border-radius: 8px;
+  transition: border-color 0.15s;
+}
+
+.prep-fields textarea {
+  resize: vertical;
+  min-height: 44px;
+  line-height: 1.45;
+}
+
+.prep-fields input:focus,
+.prep-fields textarea:focus {
+  outline: none;
+  border-color: var(--ink-2);
+}
+
 /* ——— View toggle ——— */
 
 .view-toggle {

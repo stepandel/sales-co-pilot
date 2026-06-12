@@ -5,8 +5,8 @@ const api = {
   requestMicrophonePermission: () => ipcRenderer.invoke('permissions:request-microphone'),
   openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') =>
     ipcRenderer.invoke('permissions:open-settings', pane),
-  analyzeCall: (transcript: unknown[], previous?: unknown) =>
-    ipcRenderer.invoke('ai:analyze-call', transcript, previous ?? null),
+  analyzeCall: (transcript: unknown[], previous?: unknown, callContext?: unknown) =>
+    ipcRenderer.invoke('ai:analyze-call', transcript, previous ?? null, callContext ?? null),
   startMeeting: (title?: string, options?: unknown) =>
     ipcRenderer.invoke('meeting:start', title, options),
   saveTranscript: (turns: unknown[]) => ipcRenderer.invoke('meeting:transcript', turns),

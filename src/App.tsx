@@ -117,6 +117,8 @@ function analysisReducer(state: AnalysisState, action: AnalysisAction): Analysis
 // stays a thin view layer.
 function useCopilotSession() {
   const [meetingTitle, setMeetingTitle] = useState('Discovery call')
+  const [prospectName, setProspectName] = useState('')
+  const [callNotes, setCallNotes] = useState('')
   const [session, setSession] = useState<MeetingSession | null>(null)
   const [view, setView] = useState<'copilot' | 'transcript'>('copilot')
   const [isLoading, setIsLoading] = useState(false)
@@ -468,7 +470,10 @@ function useCopilotSession() {
     try {
       // Feed the previous analysis back as working state — the model holds
       // stage/questions steady across passes instead of re-deriving them.
-      const result = await window.salesCopilot.analyzeCall(analysisTurns, copilotAnalysis)
+      const result = await window.salesCopilot.analyzeCall(analysisTurns, copilotAnalysis, {
+        prospectName: prospectName.trim() || null,
+        notes: callNotes.trim() || null,
+      })
       dispatchAnalysis({
         type: 'succeeded',
         model: result.model,
@@ -550,6 +555,10 @@ function useCopilotSession() {
   return {
     meetingTitle,
     setMeetingTitle,
+    prospectName,
+    setProspectName,
+    callNotes,
+    setCallNotes,
     session,
     view,
     setView,
@@ -590,6 +599,10 @@ function App() {
   const {
     meetingTitle,
     setMeetingTitle,
+    prospectName,
+    setProspectName,
+    callNotes,
+    setCallNotes,
     session,
     view,
     setView,
@@ -654,6 +667,24 @@ function App() {
           {formatElapsed(callSeconds)} <em>/ {formatElapsed(TARGET_SECONDS)}</em>
         </span>
       </div>
+
+      {showStart && (
+        <div className="prep-fields">
+          <input
+            value={prospectName}
+            onChange={(event) => setProspectName(event.target.value)}
+            placeholder="Prospect name"
+            aria-label="Prospect name"
+          />
+          <textarea
+            value={callNotes}
+            onChange={(event) => setCallNotes(event.target.value)}
+            placeholder="Context for the call — who they are, why you're talking, what you want to learn"
+            aria-label="Call context"
+            rows={3}
+          />
+        </div>
+      )}
 
       <div className="view-toggle">
         <button
