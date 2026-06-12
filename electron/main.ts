@@ -402,7 +402,7 @@ function parseCopilotAnalysis(value: unknown): CopilotAnalysis {
     ? record.facts
         .filter((fact): fact is string => typeof fact === 'string' && fact.trim().length > 0)
         .map((fact) => fact.trim())
-        .slice(0, 8)
+        .slice(0, 12)
     : []
   const completedGaps = Array.isArray(record.completedGaps)
     ? record.completedGaps
