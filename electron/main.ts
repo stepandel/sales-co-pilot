@@ -8,6 +8,7 @@ import {
   postMortemSystemPrompt,
 } from './postMortemPrompt'
 import { parseTranscript } from '../shared/transcript'
+import { registerSttIpc } from './transcription'
 import {
   type CallContext,
   copilotAnalysisSchema,
@@ -614,6 +615,8 @@ async function runPostMortemAnalysis(transcript: TranscriptTurn[]) {
     postMortem: parsePostMortem(parseJsonModelContent(text)),
   }
 }
+
+registerSttIpc()
 
 ipcMain.handle('permissions:get-state', getPermissionState)
 

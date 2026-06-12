@@ -1,6 +1,6 @@
 # Sales Co-Pilot
 
-Electron desktop scaffold for a Granola-style sales call assistant. The app can start, pause, and stop a meeting session, checks desktop capture readiness, and exposes a typed bridge for native capture and transcription work.
+Electron desktop scaffold for a Granola-style sales call assistant. The app captures both sides of a call (microphone + system-audio loopback), transcribes them locally with NVIDIA Parakeet TDT — no audio ever leaves the machine — and coaches the rep live as transcript turns land.
 
 ## Run locally
 
@@ -56,6 +56,8 @@ metadata header are skipped; a line that matches neither shape continues the pre
 ## Current Architecture
 
 - `electron/main.ts` owns the desktop window, meeting session lifecycle, capture-source discovery, and OS permission helpers.
+- `electron/transcription.ts` runs local speech-to-text in the main process: Parakeet TDT 0.6B (int8 ONNX, via sherpa-onnx) decodes VAD-segmented utterances per channel; mic = rep, system audio = prospect, so speaker labels need no diarization.
+- `src/audio/capture.ts` taps the meeting MediaStreams with an AudioWorklet, resamples to 16kHz mono, and ships 100ms PCM frames to the main process over IPC.
 - `electron/copilotPrompt.ts` contains the ycmoss-derived discovery prompt and structured output schema.
 - `electron/preload.ts` exposes a narrow `window.salesCopilot` API to the renderer through Electron IPC.
 - `src/App.tsx` is the meeting console UI with capture readiness, meeting controls, transcript display, and AI coaching placeholders.
@@ -66,15 +68,21 @@ metadata header are skipped; a line that matches neither shape continues the pre
 
 Permission checks may briefly open an audio stream to verify that the OS returned usable tracks, but those probe streams are stopped immediately. Persistent microphone and system-audio streams are only kept while a meeting is actively recording. Stopping or pausing a meeting releases all audio tracks.
 
-## Native Capture Roadmap
+## Live Transcription (local STT)
 
-Live mic capture can be handled with WebRTC media APIs or a main-process audio pipeline. System audio capture across FaceTime, WhatsApp, Google Meet, Zoom, and other apps will need an OS-specific implementation, commonly one of:
+Live calls are transcribed on-device — Parakeet is an offline (non-streaming) model, so "live"
+means Silero VAD watches each channel and Parakeet decodes one utterance at a time as the speaker
+pauses (~0.1–0.4s per utterance on Apple Silicon, ~30× real-time). Segments stream back to the
+renderer on the `transcript:segment` channel and feed the same turn list the replay/test modes use,
+so checkpointing, auto-analysis, and the saved record all behave identically.
 
-- macOS ScreenCaptureKit audio capture for supported versions.
-- A virtual audio device such as BlackHole or a bundled/native driver flow.
-- A native Node/Electron module that captures loopback audio on Windows.
+On first meeting start the app downloads the model (~640 MB, one-time) to `userData/models/` —
+it is deliberately not bundled in the DMG. Capture requires macOS Microphone and Screen Recording
+permissions (the latter powers system-audio loopback). See `experiments/parakeet-stt/` for the
+feasibility spike and benchmarks.
 
-Once raw audio frames are available, add a transcription adapter behind the meeting IPC layer, then stream transcript segments back to the renderer with `meeting:updated` or a dedicated `transcript:segment` channel.
+Windows/Linux still need an OS-specific loopback story (virtual audio device, or a native
+loopback module); the STT engine itself is cross-platform.
 
 ## AI Coaching
 

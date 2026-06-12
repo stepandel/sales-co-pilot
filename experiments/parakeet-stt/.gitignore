@@ -4,3 +4,4 @@ silero_vad.onnx
 *.tar.bz2
 *.wav
 *.aiff
+app-smoke.cjs

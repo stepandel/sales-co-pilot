@@ -41,6 +41,25 @@ const api = {
 
     return () => ipcRenderer.removeListener('meetings:changed', listener)
   },
+  sttGetStatus: () => ipcRenderer.invoke('stt:get-status'),
+  sttDownloadModel: () => ipcRenderer.invoke('stt:download'),
+  sttStart: () => ipcRenderer.invoke('stt:start'),
+  sttStop: () => ipcRenderer.invoke('stt:stop'),
+  // Fire-and-forget: ~10 chunks/s/channel of 100ms 16kHz PCM while recording.
+  sendAudioChunk: (channel: 'rep' | 'prospect', samples: Float32Array) =>
+    ipcRenderer.send('stt:audio', channel, samples),
+  onSttStatus: (callback: (status: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, status: unknown) => callback(status)
+    ipcRenderer.on('stt:status', listener)
+
+    return () => ipcRenderer.removeListener('stt:status', listener)
+  },
+  onTranscriptSegment: (callback: (segment: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, segment: unknown) => callback(segment)
+    ipcRenderer.on('transcript:segment', listener)
+
+    return () => ipcRenderer.removeListener('transcript:segment', listener)
+  },
 }
 
 contextBridge.exposeInMainWorld('salesCopilot', api)

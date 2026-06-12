@@ -18,6 +18,7 @@
     "npm:lucide-react@^1.17.0": "1.17.0_react@19.2.7",
     "npm:react-dom@^19.2.6": "19.2.7_react@19.2.7",
     "npm:react@^19.2.6": "19.2.7",
+    "npm:sherpa-onnx-node@^1.13.2": "1.13.2",
     "npm:typescript-eslint@^8.59.2": "8.61.0_eslint@10.4.1_typescript@6.0.3",
     "npm:typescript@~6.0.2": "6.0.3",
     "npm:vite@^8.0.12": "8.0.16_@types+node@24.13.1_esbuild@0.27.7",
@@ -2498,6 +2499,47 @@
     "shell-quote@1.8.4": {
       "integrity": "sha512-VsC6n6vz1ihYYyZZwX7YZSF5l5x36ca17OC+a69h94YqB7X6XLwf+5MOgynYir2SLFUbl8gIYvBo8K8RoNQ6bQ=="
     },
+    "sherpa-onnx-darwin-arm64@1.13.2": {
+      "integrity": "sha512-sakY1+WH/Va/vhzwlhIKXaMr0ioKsJ55w785QH+VDFyUqq1+2InbmB3BgX5gyYKeuW40R0U0IW5c7wnMArhpdw==",
+      "os": ["darwin"],
+      "cpu": ["arm64"]
+    },
+    "sherpa-onnx-darwin-x64@1.13.2": {
+      "integrity": "sha512-VyiTiaU/QmBKh5ymEVefc86kMONyJxHaIKpAq0Cf60v/PGEfyfiFaWGGEJyysf8R8PXECB2YLv2wtKAomfcfcw==",
+      "os": ["darwin"],
+      "cpu": ["x64"]
+    },
+    "sherpa-onnx-linux-arm64@1.13.2": {
+      "integrity": "sha512-IJNyd6ORcMpy1oR2ZXGNidRiPuIh5KWoOYSIOhW9UQ/BUIY43P6fq8Y3XcFj1xNjBtwke7keMW9DA7ZPYxlYoQ==",
+      "os": ["linux"],
+      "cpu": ["arm64"]
+    },
+    "sherpa-onnx-linux-x64@1.13.2": {
+      "integrity": "sha512-CI2pTKgbOTOpAbm6cSwsFzJZ9qD+xcpEKPfmMCMI7KjaEePnTfky+FYxVBvllbYNk9DQznuTT0Ob9XsBhwtE/Q==",
+      "os": ["linux"],
+      "cpu": ["x64"]
+    },
+    "sherpa-onnx-node@1.13.2": {
+      "integrity": "sha512-uIH6SA5Or4pb8HlCYWB3K54XkMtzdef4/tkw1amtIf8GB1tt6hQLpur9p2jSFNfTYRyzZ8XrXofxefXQ0A7EUA==",
+      "optionalDependencies": [
+        "sherpa-onnx-darwin-arm64",
+        "sherpa-onnx-darwin-x64",
+        "sherpa-onnx-linux-arm64",
+        "sherpa-onnx-linux-x64",
+        "sherpa-onnx-win-ia32",
+        "sherpa-onnx-win-x64"
+      ]
+    },
+    "sherpa-onnx-win-ia32@1.13.2": {
+      "integrity": "sha512-PJxFuZB6VcwxscP9whLdxBMhHWZ88Ax35LeKpAZWXIvFjIviX1yPJB1+ndhXvF9Nh1L8gPgO9MUBfC1BMKqzvw==",
+      "os": ["win32"],
+      "cpu": ["ia32"]
+    },
+    "sherpa-onnx-win-x64@1.13.2": {
+      "integrity": "sha512-D11eEIW4LZLK6Q+yPGmpJ+45gV8EqiwcPNZiE/RoveBsasZCBtl3YXXqvH2APyHafhDk+L8pD/dDR7HdH3GZJw==",
+      "os": ["win32"],
+      "cpu": ["x64"]
+    },
     "signal-exit@3.0.7": {
       "integrity": "sha512-wnD2ZE+l+SPC/uoS0vXeE9L1+0wuaMqKlfz9AMUo38JsyLSBWSFcHR1Rri62LZc12vLr1gb3jl7iwQhgwpAbGQ=="
     },
@@ -2871,6 +2913,7 @@
         "npm:lucide-react@^1.17.0",
         "npm:react-dom@^19.2.6",
         "npm:react@^19.2.6",
+        "npm:sherpa-onnx-node@^1.13.2",
         "npm:typescript-eslint@^8.59.2",
         "npm:typescript@~6.0.2",
         "npm:vite@^8.0.12",

@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import './App.css'
-import type { CopilotAnalysis, MeetingSession, ReplayPayload, TranscriptTurn } from './types/electron'
+import type {
+  CopilotAnalysis,
+  MeetingSession,
+  ReplayPayload,
+  TranscriptSegment,
+  TranscriptTurn,
+} from './types/electron'
 import { DISCOVERY_STAGES } from './discovery'
+import { startAudioPump } from './audio/capture'
 import { CaptureSetup, type AudioAccessState } from './components/CaptureSetup'
 import { CopilotView } from './components/CopilotView'
 import { Titlebar } from './components/Titlebar'
@@ -31,14 +38,23 @@ const transcriptPreview = [
   },
 ]
 
-const transcriptForAnalysis = transcriptPreview.map((line) => ({
-  speaker: line.speaker === 'You' ? 'rep' : 'prospect',
-  name: line.speaker,
-  text: line.text,
-  timestamp: line.time,
-})) satisfies TranscriptTurn[]
-
 const AUTO_ANALYZE_INTERVAL_MS = 5_000
+
+// Live STT segments → transcript turns. The capture channel *is* the speaker
+// (mic = rep, system audio = prospect), so no diarization is involved.
+// Utterances can finish out of order across channels — a short interjection
+// ends before a long monologue that started earlier — so order by start time.
+function turnsFromSegments(segments: TranscriptSegment[], prospectName: string): TranscriptTurn[] {
+  const name = prospectName.trim() || 'Prospect'
+  return [...segments]
+    .sort((a, b) => a.startSeconds - b.startSeconds)
+    .map((segment) => ({
+      speaker: segment.channel,
+      name: segment.channel === 'rep' ? 'You' : name,
+      text: segment.text,
+      timestamp: formatElapsed(Math.round(segment.startSeconds)),
+    }))
+}
 const REPLAY_SPEEDS = [1, 4, 8] as const
 
 function readableError(error: unknown) {
@@ -138,8 +154,11 @@ function useCopilotSession() {
   const [replayLines, setReplayLines] = useState<ParsedTranscriptLine[]>([])
   const [replaySpeed, setReplaySpeed] = useState<(typeof REPLAY_SPEEDS)[number]>(1)
   const [scrubOffset, setScrubOffset] = useState(0)
+  // Utterances streamed from the local STT engine during a live call.
+  const [liveSegments, setLiveSegments] = useState<TranscriptSegment[]>([])
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
+  const stopAudioPumpRef = useRef<(() => void) | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const lastAutoAnalyzeRef = useRef({ count: 0, at: 0 })
   const lastSavedTurnCountRef = useRef(-1)
@@ -197,13 +216,24 @@ function useCopilotSession() {
     [replayMode, session, replayLines, callSeconds],
   )
 
+  const liveTurns: TranscriptTurn[] = useMemo(
+    () => turnsFromSegments(liveSegments, prospectName),
+    [liveSegments, prospectName],
+  )
+
   const displayedTranscript = replayMode
     ? revealedLines.map((line) => ({
         speaker: line.isRep ? 'You' : line.speaker,
         time: line.time,
         text: line.text,
       }))
-    : transcriptPreview
+    : session || liveTurns.length > 0
+      ? liveTurns.map((turn) => ({
+          speaker: turn.name ?? (turn.speaker === 'rep' ? 'You' : 'Prospect'),
+          time: turn.timestamp ?? '',
+          text: turn.text,
+        }))
+      : transcriptPreview
 
   const analysisTurns: TranscriptTurn[] = replayMode
     ? revealedLines.map((line) => ({
@@ -212,7 +242,7 @@ function useCopilotSession() {
         text: line.text,
         timestamp: line.time,
       }))
-    : transcriptForAnalysis
+    : liveTurns
 
   useEffect(() => {
     sessionActiveRef.current = Boolean(
@@ -247,9 +277,26 @@ function useCopilotSession() {
     })
     const removeReplayListener = window.salesCopilot.onReplayLoad(applyReplay)
 
+    const removeSegmentListener = window.salesCopilot.onTranscriptSegment((segment) => {
+      setLiveSegments((current) => [...current, segment])
+    })
+
+    // Surface model download progress (a one-time ~640 MB fetch) while the
+    // user waits on the Start button.
+    const removeSttStatusListener = window.salesCopilot.onSttStatus((status) => {
+      if (status.state === 'downloading') {
+        setAudioAccess((current) => ({
+          ...current,
+          message: `Downloading the local transcription model… ${Math.round(status.progress * 100)}%`,
+        }))
+      }
+    })
+
     return () => {
       removeMeetingListener()
       removeReplayListener()
+      removeSegmentListener()
+      removeSttStatusListener()
       stopAudioStreams()
     }
   }, [])
@@ -260,20 +307,20 @@ function useCopilotSession() {
     }
   }, [view, displayedTranscript.length])
 
-  // While a replay plays, re-run the co-pilot as new lines land (throttled),
-  // exactly as live STT would.
+  // Re-run the co-pilot as new lines land (throttled) — live STT segments
+  // and replay reveals feed the same loop.
   useEffect(() => {
-    if (!replayMode || !isRecording || isAnalyzing) {
+    if (!isRecording || isAnalyzing) {
       return
     }
 
     const last = lastAutoAnalyzeRef.current
-    if (revealedLines.length > last.count && Date.now() - last.at >= AUTO_ANALYZE_INTERVAL_MS) {
-      lastAutoAnalyzeRef.current = { count: revealedLines.length, at: Date.now() }
+    if (analysisTurns.length > last.count && Date.now() - last.at >= AUTO_ANALYZE_INTERVAL_MS) {
+      lastAutoAnalyzeRef.current = { count: analysisTurns.length, at: Date.now() }
       void analyzeCall()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- analyzeCall is recreated every render; the throttle guard owns when it fires
-  }, [replayMode, isRecording, isAnalyzing, revealedLines.length])
+  }, [isRecording, isAnalyzing, analysisTurns.length])
 
   // Checkpoint the transcript to disk whenever the turn list changes during a
   // call, so a crash or force-quit loses at most the line in flight. The final
@@ -295,10 +342,53 @@ function useCopilotSession() {
   }, [sessionStatus, analysisTurns.length])
 
   function stopAudioStreams() {
+    stopAudioPumpRef.current?.()
+    stopAudioPumpRef.current = null
     microphoneStreamRef.current?.getTracks().forEach((track) => track.stop())
     systemAudioStreamRef.current?.getTracks().forEach((track) => track.stop())
     microphoneStreamRef.current = null
     systemAudioStreamRef.current = null
+  }
+
+  // Feed both capture streams to the local STT engine in the main process.
+  async function startLiveTranscription() {
+    if (!window.salesCopilot || !microphoneStreamRef.current || !systemAudioStreamRef.current) {
+      return
+    }
+
+    stopAudioPumpRef.current?.()
+    stopAudioPumpRef.current = await startAudioPump(
+      { rep: microphoneStreamRef.current, prospect: systemAudioStreamRef.current },
+      (channel, samples) => window.salesCopilot?.sendAudioChunk(channel, samples),
+    )
+  }
+
+  // Make sure the Parakeet model is on disk, downloading it on first use.
+  // The stt:status listener narrates progress in the capture drawer.
+  async function ensureSttReady() {
+    if (!window.salesCopilot) {
+      throw new Error('Desktop bridge is unavailable.')
+    }
+
+    let status = await window.salesCopilot.sttGetStatus()
+    if (status.state === 'ready') {
+      return
+    }
+
+    if (status.state === 'not-installed') {
+      throw new Error('Local transcription engine is unavailable in this build.')
+    }
+
+    setAudioAccess((current) => ({
+      ...current,
+      message: 'Downloading the local transcription model (one-time, ~640 MB)…',
+    }))
+    status = await window.salesCopilot.sttDownloadModel()
+    if (status.state !== 'ready') {
+      throw new Error(
+        status.state === 'error' ? status.message : 'The transcription model is not ready yet.',
+      )
+    }
   }
 
   async function requestMicrophone() {
@@ -444,9 +534,18 @@ function useCopilotSession() {
         return
       }
 
+      await ensureSttReady()
       await startAudioStreams()
+      const sttResult = await window.salesCopilot.sttStart()
+      if ('error' in sttResult) {
+        throw new Error(sttResult.error)
+      }
+
+      setLiveSegments([])
+      lastAutoAnalyzeRef.current = { count: 0, at: 0 }
+      dispatchAnalysis({ type: 'reset' })
+      await startLiveTranscription()
       setSession(await window.salesCopilot.startMeeting(meetingTitle))
-      void analyzeCall()
     } catch (error) {
       stopAudioStreams()
       setAudioAccess((current) => ({
@@ -461,7 +560,7 @@ function useCopilotSession() {
   }
 
   async function analyzeCall() {
-    if (!window.salesCopilot) {
+    if (!window.salesCopilot || analysisTurns.length === 0) {
       return
     }
 
@@ -510,6 +609,7 @@ function useCopilotSession() {
       if (session?.status === 'paused') {
         if (!replayMode) {
           await startAudioStreams()
+          await startLiveTranscription()
         }
         setSession(await window.salesCopilot.pauseMeeting())
       }
@@ -530,12 +630,25 @@ function useCopilotSession() {
       return
     }
 
+    // Stop the STT engine first: it flushes any utterance still buffered
+    // (speech that never hit a long-enough silence) so the trailing words
+    // make it into the saved record.
+    let finalTurns = analysisTurns
+    if (!replayMode) {
+      const flushed = await window.salesCopilot.sttStop()
+      if (flushed.length > 0) {
+        const segments = [...liveSegments, ...flushed]
+        setLiveSegments(segments)
+        finalTurns = turnsFromSegments(segments, prospectName)
+      }
+    }
+
     // Persist the finished call (transcript + latest analysis) so it shows
     // up in the meetings dashboard.
     setSession(
       await window.salesCopilot.stopMeeting({
         durationSeconds: callSeconds,
-        transcript: analysisTurns,
+        transcript: finalTurns,
         analysis: copilotAnalysis,
         model: copilotAnalysis ? copilotModel : null,
       }),

@@ -81,6 +81,23 @@ export type PostMortem = {
   couldImprove: string[]
 }
 
+/** One VAD-segmented utterance decoded by the local STT engine. */
+export type TranscriptSegment = {
+  /** Which capture stream it came from: mic = rep, system audio = prospect. */
+  channel: 'rep' | 'prospect'
+  text: string
+  /** Offset from STT start, in seconds of accepted audio. */
+  startSeconds: number
+  endSeconds: number
+}
+
+export type SttStatus =
+  | { state: 'not-installed' }
+  | { state: 'not-downloaded' }
+  | { state: 'downloading'; progress: number }
+  | { state: 'ready' }
+  | { state: 'error'; message: string }
+
 export type MeetingChatMessage = {
   role: 'user' | 'assistant'
   content: string
@@ -142,6 +159,15 @@ export type SalesCopilotApi = {
   onReplayLoad: (callback: (payload: ReplayPayload | null) => void) => () => void
   onMeetingUpdated: (callback: (session: MeetingSession | null) => void) => () => void
   onMeetingsChanged: (callback: () => void) => () => void
+  sttGetStatus: () => Promise<SttStatus>
+  /** Resolves once the model is downloaded (or with the failure state). */
+  sttDownloadModel: () => Promise<SttStatus>
+  sttStart: () => Promise<{ ok: true } | { error: string }>
+  /** Stops the engine; resolves with any trailing utterances still buffered. */
+  sttStop: () => Promise<TranscriptSegment[]>
+  sendAudioChunk: (channel: 'rep' | 'prospect', samples: Float32Array) => void
+  onSttStatus: (callback: (status: SttStatus) => void) => () => void
+  onTranscriptSegment: (callback: (segment: TranscriptSegment) => void) => () => void
 }
 
 declare global {

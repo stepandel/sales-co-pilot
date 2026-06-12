@@ -14,7 +14,8 @@
   "dependencies": {
     "lucide-react": "^1.17.0",
     "react": "^19.2.6",
-    "react-dom": "^19.2.6"
+    "react-dom": "^19.2.6",
+    "sherpa-onnx-node": "^1.13.2"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -42,7 +43,13 @@
     "files": [
       "dist/**/*",
       "dist-electron/**/*",
-      "package.json"
+      "package.json",
+      "node_modules/sherpa-onnx-node/**",
+      "node_modules/sherpa-onnx-darwin-arm64/**"
+    ],
+    "asarUnpack": [
+      "node_modules/sherpa-onnx-node/**",
+      "node_modules/sherpa-onnx-darwin-arm64/**"
     ],
     "mac": {
       "category": "public.app-category.business",
