@@ -54,6 +54,9 @@
     "mac": {
       "category": "public.app-category.business",
       "icon": "build/icon.icns",
+      "hardenedRuntime": true,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
       "extendInfo": {
         "NSMicrophoneUsageDescription": "Sales Co-Pilot needs microphone access to transcribe your side of sales calls.",
         "NSAudioCaptureUsageDescription": "Sales Co-Pilot needs system audio access to transcribe remote participants in calls.",

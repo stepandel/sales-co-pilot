@@ -66,6 +66,21 @@ type StopMeetingPayload = {
   model?: string | null
 }
 
+// System-audio loopback (the prospect channel): Electron 39+ defaults
+// `audio: 'loopback'` to Apple's Core Audio tap API, which on this stack
+// (Electron 42 / macOS 26) fails silently — getDisplayMedia returns an audio
+// track that is permanently silent, with no error anywhere, and Electron
+// explicitly does not fall back when tap creation fails. Disabling the tap
+// feature drops loopback back to the ScreenCaptureKit path, which works and
+// is covered by the Screen Recording permission the app already requires.
+// Verified empirically: tap path RMS 0.000 vs SCK path RMS 0.49 on the same
+// audio. Revisit if a future Electron fixes the tap path (it needs
+// NSAudioCaptureUsageDescription + the audio-input entitlement, both already
+// in place).
+if (process.platform === 'darwin') {
+  app.commandLine.appendSwitch('disable-features', 'MacCatapLoopbackAudioForScreenShare')
+}
+
 const isDev = Boolean(process.env.VITE_DEV_SERVER_URL)
 let mainWindow: BrowserWindow | null = null
 let dashboardWindow: BrowserWindow | null = null
