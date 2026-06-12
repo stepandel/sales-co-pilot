@@ -14,6 +14,7 @@ type CopilotViewProps = {
   completedGaps: Set<string>
   facts: string[]
   copilotModel: string
+  copilotLatencyMs: number | null
   copilotError: string
   onAnalyze: () => void
 }
@@ -27,6 +28,7 @@ export function CopilotView({
   completedGaps,
   facts,
   copilotModel,
+  copilotLatencyMs,
   copilotError,
   onAnalyze,
 }: CopilotViewProps) {
@@ -109,7 +111,12 @@ export function CopilotView({
         </section>
 
         <div className="analyze-row">
-          <span>{copilotModel}</span>
+          <span>
+            {copilotModel}
+            {copilotLatencyMs !== null && (
+              <em className="analyze-latency"> · {(copilotLatencyMs / 1000).toFixed(1)}s</em>
+            )}
+          </span>
           <button type="button" onClick={onAnalyze} disabled={isAnalyzing}>
             <Sparkles size={13} />
             {isAnalyzing ? 'Thinking…' : 'Analyze'}

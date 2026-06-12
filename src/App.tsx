@@ -72,11 +72,13 @@ type AnalysisState = {
   error: string
   model: string
   isAnalyzing: boolean
+  /** Round-trip time of the last successful analysis, null before the first. */
+  latencyMs: number | null
 }
 
 type AnalysisAction =
   | { type: 'start' }
-  | { type: 'succeeded'; model: string; analysis: CopilotAnalysis }
+  | { type: 'succeeded'; model: string; analysis: CopilotAnalysis; latencyMs: number }
   | { type: 'failed'; error: string }
   | { type: 'finished' }
   | { type: 'reset' }
@@ -86,6 +88,7 @@ const initialAnalysisState: AnalysisState = {
   error: '',
   model: 'gpt-5.4-mini',
   isAnalyzing: false,
+  latencyMs: null,
 }
 
 function analysisReducer(state: AnalysisState, action: AnalysisAction): AnalysisState {
@@ -93,13 +96,13 @@ function analysisReducer(state: AnalysisState, action: AnalysisAction): Analysis
     case 'start':
       return { ...state, isAnalyzing: true, error: '' }
     case 'succeeded':
-      return { ...state, model: action.model, analysis: action.analysis }
+      return { ...state, model: action.model, analysis: action.analysis, latencyMs: action.latencyMs }
     case 'failed':
       return { ...state, error: action.error }
     case 'finished':
       return { ...state, isAnalyzing: false }
     case 'reset':
-      return { ...state, analysis: null, error: '' }
+      return { ...state, analysis: null, error: '', latencyMs: null }
     default:
       return state
   }
@@ -113,8 +116,13 @@ function useCopilotSession() {
   const [view, setView] = useState<'copilot' | 'transcript'>('copilot')
   const [isLoading, setIsLoading] = useState(false)
   const [analysisState, dispatchAnalysis] = useReducer(analysisReducer, initialAnalysisState)
-  const { analysis: copilotAnalysis, error: copilotError, model: copilotModel, isAnalyzing } =
-    analysisState
+  const {
+    analysis: copilotAnalysis,
+    error: copilotError,
+    model: copilotModel,
+    isAnalyzing,
+    latencyMs: copilotLatencyMs,
+  } = analysisState
   const [audioAccess, setAudioAccess] = useState<AudioAccessState>({
     microphone: 'idle',
     systemAudio: 'idle',
@@ -432,9 +440,15 @@ function useCopilotSession() {
     }
 
     dispatchAnalysis({ type: 'start' })
+    const startedAt = performance.now()
     try {
       const result = await window.salesCopilot.analyzeCall(analysisTurns)
-      dispatchAnalysis({ type: 'succeeded', model: result.model, analysis: result.analysis })
+      dispatchAnalysis({
+        type: 'succeeded',
+        model: result.model,
+        analysis: result.analysis,
+        latencyMs: performance.now() - startedAt,
+      })
     } catch (error) {
       dispatchAnalysis({ type: 'failed', error: readableError(error) || 'Co-pilot analysis failed.' })
     } finally {
@@ -516,6 +530,7 @@ function useCopilotSession() {
     isLoading,
     isAnalyzing,
     copilotModel,
+    copilotLatencyMs,
     copilotAnalysis,
     copilotError,
     audioAccess,
@@ -555,6 +570,7 @@ function App() {
     isLoading,
     isAnalyzing,
     copilotModel,
+    copilotLatencyMs,
     copilotAnalysis,
     copilotError,
     audioAccess,
@@ -663,6 +679,7 @@ function App() {
           completedGaps={completedGaps}
           facts={copilotAnalysis?.facts ?? []}
           copilotModel={copilotModel}
+          copilotLatencyMs={copilotLatencyMs}
           copilotError={copilotError}
           onAnalyze={analyzeCall}
         />

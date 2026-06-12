@@ -661,6 +661,12 @@
   color: var(--ink-3);
 }
 
+.analyze-latency {
+  font-style: normal;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
 .analyze-row button {
   display: flex;
   align-items: center;
