@@ -23,6 +23,14 @@ export type MeetingSession = {
   startedAt: string
   status: MeetingStatus
   elapsedSeconds: number
+  /** Replays of saved meetings are never persisted as new records. */
+  replay?: boolean
+}
+
+export type ReplayPayload = {
+  id: string
+  title: string
+  turns: TranscriptTurn[]
 }
 
 export type TranscriptTurn = {
@@ -101,8 +109,7 @@ export type SalesCopilotApi = {
   requestMicrophonePermission: () => Promise<PermissionState>
   openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') => Promise<boolean>
   analyzeCall: (transcript: TranscriptTurn[]) => Promise<AnalyzeCallResult>
-  getTestTranscript: () => Promise<string | null>
-  startMeeting: (title?: string) => Promise<MeetingSession>
+  startMeeting: (title?: string, options?: { replay?: boolean }) => Promise<MeetingSession>
   saveTranscript: (turns: TranscriptTurn[]) => Promise<boolean>
   pauseMeeting: () => Promise<MeetingSession | null>
   stopMeeting: (payload?: StopMeetingPayload) => Promise<MeetingSession | null>
@@ -117,6 +124,9 @@ export type SalesCopilotApi = {
   ) => Promise<{ reply: string } | { error: string }>
   deleteMeeting: (id: string) => Promise<boolean>
   openDashboard: () => Promise<boolean>
+  openCopilot: (meetingId?: string) => Promise<boolean>
+  getPendingReplay: () => Promise<ReplayPayload | null>
+  onReplayLoad: (callback: (payload: ReplayPayload | null) => void) => () => void
   onMeetingUpdated: (callback: (session: MeetingSession | null) => void) => () => void
   onMeetingsChanged: (callback: () => void) => () => void
 }

@@ -1,4 +1,4 @@
-import { CalendarDays, Clock3, Inbox, MessageSquareText, Send, Sparkles, Trash2, Upload } from 'lucide-react'
+import { CalendarDays, Clock3, Inbox, MessageSquareText, Play, Plus, Send, Sparkles, Trash2, Upload } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import './Dashboard.css'
 import type { MeetingChatMessage, MeetingRecord, MeetingSummary } from './types/electron'
@@ -228,14 +228,24 @@ function Dashboard() {
           </span>
         )}
         {window.salesCopilot && (
-          <button
-            type="button"
-            className="dash-import"
-            title="Import a transcript file"
-            onClick={() => void importTranscript()}
-          >
-            <Upload size={12} /> Import transcript
-          </button>
+          <>
+            <button
+              type="button"
+              className="dash-import"
+              title="Import a transcript file"
+              onClick={() => void importTranscript()}
+            >
+              <Upload size={12} /> Import transcript
+            </button>
+            <button
+              type="button"
+              className="dash-new"
+              title="Open the co-pilot panel for a new meeting"
+              onClick={() => void window.salesCopilot?.openCopilot()}
+            >
+              <Plus size={12} /> New meeting
+            </button>
+          </>
         )}
       </header>
 
@@ -306,6 +316,16 @@ function Dashboard() {
                   </p>
                 </div>
                 <div className="dash-detail-actions">
+                  <button
+                    type="button"
+                    className="dash-analyze"
+                    disabled={record.transcript.length === 0}
+                    title="Replay this meeting in the co-pilot panel"
+                    onClick={() => void window.salesCopilot?.openCopilot(record.id)}
+                  >
+                    <Play size={13} />
+                    Replay
+                  </button>
                   <button
                     type="button"
                     className="dash-analyze"

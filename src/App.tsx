@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useReducer, useRef, useState } from 'react'
 import './App.css'
-import type { CopilotAnalysis, MeetingSession, TranscriptTurn } from './types/electron'
+import type { CopilotAnalysis, MeetingSession, ReplayPayload, TranscriptTurn } from './types/electron'
 import { DISCOVERY_STAGES } from './discovery'
 import { CaptureSetup, type AudioAccessState } from './components/CaptureSetup'
 import { CopilotView } from './components/CopilotView'
 import { Titlebar } from './components/Titlebar'
-import { formatElapsed, parseTranscript, type ParsedTranscriptLine } from '../shared/transcript'
+import {
+  formatElapsed,
+  transcriptLinesFromTurns,
+  type ParsedTranscriptLine,
+} from '../shared/transcript'
 
 const TARGET_SECONDS = 8 * 60
 
@@ -35,7 +39,7 @@ const transcriptForAnalysis = transcriptPreview.map((line) => ({
 })) satisfies TranscriptTurn[]
 
 const AUTO_ANALYZE_INTERVAL_MS = 5_000
-const TEST_SPEEDS = [1, 4, 8] as const
+const REPLAY_SPEEDS = [1, 4, 8] as const
 
 function readableError(error: unknown) {
   const message = error instanceof Error ? error.message : String(error)
@@ -129,16 +133,19 @@ function useCopilotSession() {
     systemAudio: 'idle',
     message: 'Audio access has not been requested yet.',
   })
-  const [testLines, setTestLines] = useState<ParsedTranscriptLine[]>([])
-  const [testSpeed, setTestSpeed] = useState<(typeof TEST_SPEEDS)[number]>(1)
+  const [replayLines, setReplayLines] = useState<ParsedTranscriptLine[]>([])
+  const [replaySpeed, setReplaySpeed] = useState<(typeof REPLAY_SPEEDS)[number]>(1)
   const [scrubOffset, setScrubOffset] = useState(0)
   const microphoneStreamRef = useRef<MediaStream | null>(null)
   const systemAudioStreamRef = useRef<MediaStream | null>(null)
   const transcriptRef = useRef<HTMLDivElement | null>(null)
   const lastAutoAnalyzeRef = useRef({ count: 0, at: 0 })
   const lastSavedTurnCountRef = useRef(-1)
+  // Mirrors whether a session is running, for the replay:load listener whose
+  // closure would otherwise go stale.
+  const sessionActiveRef = useRef(false)
 
-  const testMode = testLines.length > 0
+  const replayMode = replayLines.length > 0
   const isRecording = session?.status === 'recording'
   const showStart = !session || session.status === 'stopped' || session.status === 'idle'
   const canUseDesktopBridge = Boolean(window.salesCopilot)
@@ -172,23 +179,23 @@ function useCopilotSession() {
   )
 
   const elapsedSeconds = session?.elapsedSeconds ?? 0
-  // In test mode the session timer drives a synthetic call clock that the
+  // In replay mode the session timer drives a synthetic call clock that the
   // playback speed multiplies and the scrubber offsets; everything downstream
   // (timer, pacing, reveals) runs on call time so they stay coherent.
-  const callSeconds = testMode
-    ? Math.max(0, elapsedSeconds * testSpeed + scrubOffset)
+  const callSeconds = replayMode
+    ? Math.max(0, elapsedSeconds * replaySpeed + scrubOffset)
     : elapsedSeconds
   const shouldWrapSoon = stageIdx >= 5 || callSeconds > TARGET_SECONDS - 90
-  const transcriptDuration = testLines.length > 0 ? testLines[testLines.length - 1].seconds : 0
+  const transcriptDuration = replayLines.length > 0 ? replayLines[replayLines.length - 1].seconds : 0
 
-  // Test mode: the call clock "plays" the transcript — a line is revealed
+  // Replay: the call clock "plays" the saved transcript — a line is revealed
   // once the clock passes its timestamp.
   const revealedLines = useMemo(
-    () => (testMode && session ? testLines.filter((line) => line.seconds <= callSeconds) : []),
-    [testMode, session, testLines, callSeconds],
+    () => (replayMode && session ? replayLines.filter((line) => line.seconds <= callSeconds) : []),
+    [replayMode, session, replayLines, callSeconds],
   )
 
-  const displayedTranscript = testMode
+  const displayedTranscript = replayMode
     ? revealedLines.map((line) => ({
         speaker: line.isRep ? 'You' : line.speaker,
         time: line.time,
@@ -196,7 +203,7 @@ function useCopilotSession() {
       }))
     : transcriptPreview
 
-  const analysisTurns: TranscriptTurn[] = testMode
+  const analysisTurns: TranscriptTurn[] = replayMode
     ? revealedLines.map((line) => ({
         speaker: line.isRep ? 'rep' : 'prospect',
         name: line.speaker,
@@ -206,26 +213,41 @@ function useCopilotSession() {
     : transcriptForAnalysis
 
   useEffect(() => {
+    sessionActiveRef.current = Boolean(
+      session && session.status !== 'stopped' && session.status !== 'idle',
+    )
+  }, [session])
+
+  useEffect(() => {
     if (!window.salesCopilot) {
       return
     }
 
     const removeMeetingListener = window.salesCopilot.onMeetingUpdated(setSession)
 
-    window.salesCopilot.getTestTranscript().then((raw) => {
-      if (!raw) {
+    // Load a meeting into the panel for replay (null = a fresh live meeting).
+    // Ignored while a session is running so it can't yank the rug mid-call.
+    const applyReplay = (payload: ReplayPayload | null) => {
+      if (sessionActiveRef.current) {
         return
       }
 
-      const parsed = parseTranscript(raw)
-      setTestLines(parsed.lines)
-      if (parsed.title) {
-        setMeetingTitle(parsed.title)
+      setReplayLines(payload ? transcriptLinesFromTurns(payload.turns) : [])
+      setMeetingTitle(payload ? payload.title : 'Discovery call')
+      setScrubOffset(0)
+      dispatchAnalysis({ type: 'reset' })
+    }
+
+    window.salesCopilot.getPendingReplay().then((payload) => {
+      if (payload) {
+        applyReplay(payload)
       }
     })
+    const removeReplayListener = window.salesCopilot.onReplayLoad(applyReplay)
 
     return () => {
       removeMeetingListener()
+      removeReplayListener()
       stopAudioStreams()
     }
   }, [])
@@ -236,10 +258,10 @@ function useCopilotSession() {
     }
   }, [view, displayedTranscript.length])
 
-  // While a test call plays, re-run the co-pilot as new lines land (throttled),
+  // While a replay plays, re-run the co-pilot as new lines land (throttled),
   // exactly as live STT would.
   useEffect(() => {
-    if (!testMode || !isRecording || isAnalyzing) {
+    if (!replayMode || !isRecording || isAnalyzing) {
       return
     }
 
@@ -249,7 +271,7 @@ function useCopilotSession() {
       void analyzeCall()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps -- analyzeCall is recreated every render; the throttle guard owns when it fires
-  }, [testMode, isRecording, isAnalyzing, revealedLines.length])
+  }, [replayMode, isRecording, isAnalyzing, revealedLines.length])
 
   // Checkpoint the transcript to disk whenever the turn list changes during a
   // call, so a crash or force-quit loses at most the line in flight. The final
@@ -384,21 +406,21 @@ function useCopilotSession() {
     })
   }
 
-  // Jump the test call to an absolute position. Playback continues from there;
+  // Jump the replay to an absolute position. Playback continues from there;
   // the auto-analyze counter is rebased so the new position gets one fresh pass.
   function scrubTo(targetSeconds: number) {
-    setScrubOffset(targetSeconds - elapsedSeconds * testSpeed)
+    setScrubOffset(targetSeconds - elapsedSeconds * replaySpeed)
     lastAutoAnalyzeRef.current = {
-      count: Math.max(0, testLines.filter((line) => line.seconds <= targetSeconds).length - 1),
+      count: Math.max(0, replayLines.filter((line) => line.seconds <= targetSeconds).length - 1),
       at: lastAutoAnalyzeRef.current.at,
     }
   }
 
-  function cycleTestSpeed() {
-    const next = TEST_SPEEDS[(TEST_SPEEDS.indexOf(testSpeed) + 1) % TEST_SPEEDS.length]
+  function cycleReplaySpeed() {
+    const next = REPLAY_SPEEDS[(REPLAY_SPEEDS.indexOf(replaySpeed) + 1) % REPLAY_SPEEDS.length]
     // Rebase the offset so changing speed never jumps the call position.
     setScrubOffset(callSeconds - elapsedSeconds * next)
-    setTestSpeed(next)
+    setReplaySpeed(next)
   }
 
   async function startMeeting() {
@@ -408,15 +430,15 @@ function useCopilotSession() {
 
     setIsLoading(true)
     try {
-      if (testMode) {
+      if (replayMode) {
         lastAutoAnalyzeRef.current = { count: 0, at: 0 }
         setScrubOffset(0)
         dispatchAnalysis({ type: 'reset' })
         setAudioAccess((current) => ({
           ...current,
-          message: 'Test mode: playing the transcript file. Audio capture is bypassed.',
+          message: 'Replay: playing back the saved meeting. Audio capture is bypassed.',
         }))
-        setSession(await window.salesCopilot.startMeeting(meetingTitle))
+        setSession(await window.salesCopilot.startMeeting(meetingTitle, { replay: true }))
         return
       }
 
@@ -466,7 +488,7 @@ function useCopilotSession() {
     setIsLoading(true)
     try {
       if (session?.status === 'recording') {
-        if (!testMode) {
+        if (!replayMode) {
           stopAudioStreams()
           setAudioAccess((current) => ({
             microphone: current.microphone === 'capturing' ? 'ready' : current.microphone,
@@ -479,7 +501,7 @@ function useCopilotSession() {
       }
 
       if (session?.status === 'paused') {
-        if (!testMode) {
+        if (!replayMode) {
           await startAudioStreams()
         }
         setSession(await window.salesCopilot.pauseMeeting())
@@ -511,7 +533,7 @@ function useCopilotSession() {
         model: copilotAnalysis ? copilotModel : null,
       }),
     )
-    if (testMode) {
+    if (replayMode) {
       return
     }
 
@@ -536,8 +558,8 @@ function useCopilotSession() {
     copilotAnalysis,
     copilotError,
     audioAccess,
-    testSpeed,
-    testMode,
+    replaySpeed,
+    replayMode,
     isRecording,
     showStart,
     canUseDesktopBridge,
@@ -554,7 +576,7 @@ function useCopilotSession() {
     requestMicrophone,
     requestSystemAudio,
     scrubTo,
-    cycleTestSpeed,
+    cycleReplaySpeed,
     startMeeting,
     analyzeCall,
     pauseMeeting,
@@ -576,8 +598,8 @@ function App() {
     copilotAnalysis,
     copilotError,
     audioAccess,
-    testSpeed,
-    testMode,
+    replaySpeed,
+    replayMode,
     isRecording,
     showStart,
     canUseDesktopBridge,
@@ -594,7 +616,7 @@ function App() {
     requestMicrophone,
     requestSystemAudio,
     scrubTo,
-    cycleTestSpeed,
+    cycleReplaySpeed,
     startMeeting,
     analyzeCall,
     pauseMeeting,
@@ -606,9 +628,9 @@ function App() {
       <Titlebar
         control={showStart ? 'idle' : isRecording ? 'recording' : 'paused'}
         meetingStatus={meetingStatus}
-        testMode={testMode}
-        testSpeed={testSpeed}
-        onCycleSpeed={cycleTestSpeed}
+        replayMode={replayMode}
+        replaySpeed={replaySpeed}
+        onCycleSpeed={cycleReplaySpeed}
         isLoading={isLoading}
         canUseDesktopBridge={canUseDesktopBridge}
         onStart={startMeeting}
@@ -648,7 +670,7 @@ function App() {
         </button>
       </div>
 
-      {testMode && (
+      {replayMode && (
         <div className="scrub-row">
           <input
             type="range"
@@ -658,7 +680,7 @@ function App() {
             value={Math.min(callSeconds, transcriptDuration)}
             onChange={(event) => scrubTo(Number(event.target.value))}
             disabled={!session}
-            aria-label="Scrub through the test call"
+            aria-label="Scrub through the replay"
             style={{
               background: `linear-gradient(to right, var(--green) ${
                 transcriptDuration > 0
@@ -697,9 +719,9 @@ function App() {
               </div>
             </article>
           ))}
-          {testMode && displayedTranscript.length === 0 && (
+          {replayMode && displayedTranscript.length === 0 && (
             <p className="empty-state">
-              {session ? 'Waiting for the first line…' : 'Press Start to play the test transcript.'}
+              {session ? 'Waiting for the first line…' : 'Press Start to replay this meeting.'}
             </p>
           )}
         </div>
@@ -707,7 +729,7 @@ function App() {
 
       <CaptureSetup
         audioAccess={audioAccess}
-        testMode={testMode}
+        replayMode={replayMode}
         isLoading={isLoading}
         canUseDesktopBridge={canUseDesktopBridge}
         onCheckMic={requestMicrophone}

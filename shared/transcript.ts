@@ -44,6 +44,41 @@ export function formatElapsed(seconds = 0) {
     .padStart(2, '0')}`
 }
 
+function parseTimestampSeconds(timestamp: string): number | null {
+  const parts = timestamp.split(':').map(Number)
+  if (parts.length < 2 || parts.length > 3 || parts.some(Number.isNaN)) {
+    return null
+  }
+
+  return parts.reduce((total, part) => total * 60 + part, 0)
+}
+
+// Rebuild playable lines from stored transcript turns so a finished meeting
+// can be replayed in the co-pilot panel. Turns without timestamps fall back
+// to the same word-count pacing used when parsing raw transcript text.
+export function transcriptLinesFromTurns(
+  turns: Array<{ speaker: 'rep' | 'prospect'; name?: string; text: string; timestamp?: string }>,
+): ParsedTranscriptLine[] {
+  const lines: ParsedTranscriptLine[] = []
+  let clock = 0
+
+  for (const turn of turns) {
+    const isRep = turn.speaker === 'rep'
+    const seconds = (turn.timestamp ? parseTimestampSeconds(turn.timestamp) : null) ?? clock
+    clock = seconds + estimateUtteranceSeconds(turn.text)
+
+    lines.push({
+      speaker: turn.name ?? (isRep ? 'You' : 'Prospect'),
+      isRep,
+      seconds,
+      time: formatElapsed(seconds),
+      text: turn.text,
+    })
+  }
+
+  return lines.sort((a, b) => a.seconds - b.seconds)
+}
+
 export function parseTranscript(raw: string): ParsedTranscript {
   const lines: ParsedTranscriptLine[] = []
   let title: string | null = null

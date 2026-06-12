@@ -6,8 +6,8 @@ const api = {
   openPermissionSettings: (pane: 'microphone' | 'screen' | 'system-audio') =>
     ipcRenderer.invoke('permissions:open-settings', pane),
   analyzeCall: (transcript: unknown[]) => ipcRenderer.invoke('ai:analyze-call', transcript),
-  getTestTranscript: () => ipcRenderer.invoke('test:get-transcript'),
-  startMeeting: (title?: string) => ipcRenderer.invoke('meeting:start', title),
+  startMeeting: (title?: string, options?: unknown) =>
+    ipcRenderer.invoke('meeting:start', title, options),
   saveTranscript: (turns: unknown[]) => ipcRenderer.invoke('meeting:transcript', turns),
   pauseMeeting: () => ipcRenderer.invoke('meeting:pause'),
   stopMeeting: (payload?: unknown) => ipcRenderer.invoke('meeting:stop', payload),
@@ -19,6 +19,14 @@ const api = {
     ipcRenderer.invoke('meetings:chat', id, messages),
   deleteMeeting: (id: string) => ipcRenderer.invoke('meetings:delete', id),
   openDashboard: () => ipcRenderer.invoke('dashboard:open'),
+  openCopilot: (meetingId?: string) => ipcRenderer.invoke('copilot:open', meetingId),
+  getPendingReplay: () => ipcRenderer.invoke('replay:get-pending'),
+  onReplayLoad: (callback: (payload: unknown) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, payload: unknown) => callback(payload)
+    ipcRenderer.on('replay:load', listener)
+
+    return () => ipcRenderer.removeListener('replay:load', listener)
+  },
   onMeetingUpdated: (callback: (session: unknown) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, session: unknown) => callback(session)
     ipcRenderer.on('meeting:updated', listener)

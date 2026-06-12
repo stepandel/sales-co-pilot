@@ -9,7 +9,7 @@ export type AudioAccessState = {
 
 type CaptureSetupProps = {
   audioAccess: AudioAccessState
-  testMode: boolean
+  replayMode: boolean
   isLoading: boolean
   canUseDesktopBridge: boolean
   onCheckMic: () => void
@@ -20,7 +20,7 @@ type CaptureSetupProps = {
 
 export function CaptureSetup({
   audioAccess,
-  testMode,
+  replayMode,
   isLoading,
   canUseDesktopBridge,
   onCheckMic,
@@ -49,10 +49,10 @@ export function CaptureSetup({
 
       {setupOpen && (
         <div className="setup-drawer">
-          {testMode && (
+          {replayMode && (
             <p className="test-note">
-              <code>test-transcript.txt</code> found — meetings play this transcript instead of
-              capturing audio. Remove the file to go back to live capture.
+              Replaying a saved meeting — the stored transcript plays back instead of capturing
+              audio.
             </p>
           )}
           <p>{audioAccess.message}</p>

@@ -26,6 +26,14 @@ type MeetingSession = {
   startedAt: string
   status: MeetingStatus
   elapsedSeconds: number
+  /** Replays of saved meetings are never persisted as new records. */
+  replay?: boolean
+}
+
+type ReplayPayload = {
+  id: string
+  title: string
+  turns: TranscriptTurn[]
 }
 
 // Persisted in meetings.json. Transcript turns live in their own file under
@@ -61,6 +69,9 @@ let mainWindow: BrowserWindow | null = null
 let dashboardWindow: BrowserWindow | null = null
 let meeting: MeetingSession | null = null
 let meetingTimer: NodeJS.Timeout | null = null
+// Replay handoff to the co-pilot panel: set by copilot:open, consumed by the
+// panel on mount (or delivered live via replay:load when it is already open).
+let pendingReplay: ReplayPayload | null = null
 
 function loadLocalEnv() {
   const envPath = path.join(process.cwd(), '.env')
@@ -120,6 +131,10 @@ function createWindow() {
 
   mainWindow.setAlwaysOnTop(true, 'floating')
   mainWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+
+  mainWindow.on('closed', () => {
+    mainWindow = null
+  })
 
   if (isDev && process.env.VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(process.env.VITE_DEV_SERVER_URL)
@@ -608,29 +623,21 @@ ipcMain.handle('ai:analyze-call', async (_event, transcript: TranscriptTurn[]) =
   return runCopilotAnalysis(Array.isArray(transcript) ? transcript : [], liveModel())
 })
 
-// Test mode: when test-transcript.txt exists at the project root, the renderer
-// plays it back as the meeting source instead of live audio capture.
-ipcMain.handle('test:get-transcript', () => {
-  const transcriptPath = process.env.TEST_TRANSCRIPT ?? path.join(process.cwd(), 'test-transcript.txt')
-  try {
-    return fs.readFileSync(transcriptPath, 'utf8')
-  } catch {
-    return null
-  }
-})
-
-ipcMain.handle('meeting:start', async (_event, title?: string) => {
+ipcMain.handle('meeting:start', async (_event, title?: string, options?: { replay?: boolean }) => {
   meeting = {
     id: crypto.randomUUID(),
     title: title?.trim() || 'Untitled sales call',
     startedAt: new Date().toISOString(),
     status: 'recording',
     elapsedSeconds: 0,
+    replay: Boolean(options?.replay),
   }
 
   // Create the transcript file up front so the meeting is on disk from the
-  // first second, even if no turns ever land.
-  writeTranscriptFile(meeting, [])
+  // first second, even if no turns ever land. Replays already have one.
+  if (!meeting.replay) {
+    writeTranscriptFile(meeting, [])
+  }
 
   stopTimer()
   meetingTimer = setInterval(() => {
@@ -652,7 +659,7 @@ ipcMain.handle('meeting:start', async (_event, title?: string) => {
 // Live checkpoint: the renderer pushes the full turn list as lines land so
 // the transcript survives a crash; the final write happens on meeting:stop.
 ipcMain.handle('meeting:transcript', (_event, turns: TranscriptTurn[]) => {
-  if (meeting && meeting.status !== 'stopped') {
+  if (meeting && meeting.status !== 'stopped' && !meeting.replay) {
     writeTranscriptFile(meeting, Array.isArray(turns) ? turns : [])
     return true
   }
@@ -676,7 +683,8 @@ ipcMain.handle('meeting:stop', (_event, payload?: StopMeetingPayload) => {
     stopTimer()
     publishMeeting()
 
-    if (wasActive) {
+    // Replays revisit an existing record; never save them as new meetings.
+    if (wasActive && !meeting.replay) {
       saveMeetingRecord(meeting, payload ?? {})
     }
   }
@@ -866,17 +874,53 @@ ipcMain.handle('dashboard:open', () => {
   return true
 })
 
+// Open the co-pilot panel — for a new meeting (no id), or to replay a saved
+// one. A null payload tells an already-open panel to clear replay state.
+ipcMain.handle('copilot:open', (_event, meetingId?: string) => {
+  pendingReplay = null
+  if (typeof meetingId === 'string') {
+    const record = readMeetingRecords().find((entry) => entry.id === meetingId)
+    if (!record) {
+      return false
+    }
+
+    pendingReplay = {
+      id: record.id,
+      title: record.title,
+      turns: readTranscriptTurns(meetingId) ?? record.transcript ?? [],
+    }
+  }
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.webContents.send('replay:load', pendingReplay)
+    pendingReplay = null
+    mainWindow.focus()
+  } else {
+    createWindow()
+  }
+
+  return true
+})
+
+ipcMain.handle('replay:get-pending', () => {
+  const payload = pendingReplay
+  pendingReplay = null
+  return payload
+})
+
 app.whenReady().then(() => {
   session.defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
     callback(['media', 'display-capture'].includes(permission))
   })
   configureDisplayCapture()
 
-  createWindow()
+  // The dashboard is home; the co-pilot panel opens on demand for a new
+  // meeting or a replay.
+  createDashboardWindow()
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow()
+      createDashboardWindow()
     }
   })
 })

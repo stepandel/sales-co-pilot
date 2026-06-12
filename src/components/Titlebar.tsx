@@ -7,8 +7,8 @@ type TitlebarProps = {
    *  paused/resumed and stopped. */
   control: 'idle' | 'recording' | 'paused'
   meetingStatus: string
-  testMode: boolean
-  testSpeed: number
+  replayMode: boolean
+  replaySpeed: number
   onCycleSpeed: () => void
   isLoading: boolean
   canUseDesktopBridge: boolean
@@ -21,8 +21,8 @@ type TitlebarProps = {
 export function Titlebar({
   control,
   meetingStatus,
-  testMode,
-  testSpeed,
+  replayMode,
+  replaySpeed,
   onCycleSpeed,
   isLoading,
   canUseDesktopBridge,
@@ -38,14 +38,14 @@ export function Titlebar({
       <span className={`live-dot ${isRecording ? 'live' : ''}`} />
       <strong className="titlebar-name">Co-pilot</strong>
       <span className="titlebar-status">{meetingStatus}</span>
-      {testMode && (
+      {replayMode && (
         <button
           type="button"
           className="test-badge"
-          title="Test mode playback speed — click to change"
+          title="Replay playback speed — click to change"
           onClick={onCycleSpeed}
         >
-          Test {testSpeed}&times;
+          Replay {replaySpeed}&times;
         </button>
       )}
 
